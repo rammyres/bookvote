@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Administração — {{ poll.title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ poll.title }}</h1>
+  <p class="poll-desc">Painel do organizador. Guarde este link — só quem o possui pode administrar a enquete.</p>
+
+  <div class="warning-box">Não compartilhe este link de administração. Compartilhe apenas o link público abaixo.</div>
+
+  <label>Link público (compartilhe com os participantes)</label>
+  <div class="admin-link-box" id="public-link">{{ request.url.scheme }}://{{ request.url.netloc }}/p/{{ poll.id }}</div>
+
+  <div class="meta-row">
+    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "voting": "Votação", "closed": "Encerrada"}[phase] }}</strong></span>
+  </div>
+
+  {% if phase == "nomination" %}
+  <p class="hint">Indicações encerram automaticamente em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span>).</p>
+  <form method="post" action="/admin/{{ poll.admin_token }}/end-nomination" onsubmit="return confirm('Encerrar indicações agora e passar para a votação?');">
+    <button type="submit" class="secondary">Encerrar indicações agora</button>
+  </form>
+  {% elif phase == "voting" %}
+  <p class="hint">Votação encerra automaticamente em <strong data-utc="{{ poll.voting_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.voting_end.isoformat() }}Z"></span>).</p>
+  <form method="post" action="/admin/{{ poll.admin_token }}/end-voting" onsubmit="return confirm('Encerrar a votação agora?');">
+    <button type="submit" class="secondary">Encerrar votação agora</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Livros indicados ({{ books|length }})</h2>
+  <ul class="book-list">
+    {% for b in books %}
+    <li>
+      <span class="title">{{ b.title }}</span>
+      {% if b.author %}<span class="author"> — {{ b.author }}</span>{% endif %}
+      {% if results %}<span class="isbn" style="float:right;">
+        {% for t in results.ranked %}{% if t.book.id == b.id %}{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}{% endif %}{% endfor %}
+      </span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+
+{% if phase == "closed" and results %}
+<div class="card">
+  <h2>Resultado</h2>
+
+  {% if not results.resolved %}
+  <div class="tie-banner">
+    Empate na última vaga do top 3 entre {{ results.tie_group|length }} livros. Realize o sorteio para definir o vencedor — o resultado fica registrado e pode ser conferido por qualquer pessoa.
+  </div>
+  <form method="post" action="/admin/{{ poll.admin_token }}/draw" onsubmit="return confirm('Realizar o sorteio de desempate agora? Essa ação não pode ser refeita.');">
+    <button type="submit">Realizar sorteio</button>
+  </form>
+  {% else %}
+  <ol>
+    {% for t in top3 %}
+    <li>{{ t.book.title }} — {{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</li>
+    {% endfor %}
+  </ol>
+  {% if results.draw %}
+  <p class="hint">Desempate decidido por sorteio auditável (ver página pública para detalhes).</p>
+  {% endif %}
+  {% endif %}
+
+  <a class="btn secondary" href="/p/{{ poll.id }}">Ver página pública de resultado</a>
+</div>
+{% endif %}
+{% endblock %}

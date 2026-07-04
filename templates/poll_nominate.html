@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ poll.title }} — indicações{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="phase-tabs">
+    <span class="phase-tab active">Indicações</span>
+    <span class="phase-tab">Votação</span>
+    <span class="phase-tab">Resultado</span>
+  </div>
+
+  <h1>{{ poll.title }}</h1>
+  {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
+
+  <div class="meta-row">
+    <span>Indicações encerram em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong></span>
+    <span>faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span></span>
+  </div>
+
+  <h2>Livros indicados até agora ({{ books|length }})</h2>
+  {% if books %}
+  <ul class="book-list">
+    {% for b in books %}
+    <li>
+      <div class="title">{{ b.title }}</div>
+      {% if b.author %}<div class="author">{{ b.author }}</div>{% endif %}
+      {% if b.isbn %}<div class="isbn">ISBN {{ b.isbn }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">Nenhum livro indicado ainda — seja a primeira pessoa.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Indicar um livro</h2>
+  <p class="hint">Você já indicou {{ my_nom_count }} de {{ poll.max_noms_per_voter }} livros permitidos.</p>
+
+  {% if my_nom_count < poll.max_noms_per_voter %}
+  <form method="post" action="/p/{{ poll.id }}/nominate">
+    <label for="title">Título</label>
+    <input type="text" id="title" name="title" required>
+
+    <label for="author">Autor (opcional)</label>
+    <input type="text" id="author" name="author">
+
+    <label for="isbn">ISBN (opcional, evita duplicados)</label>
+    <input type="text" id="isbn" name="isbn" placeholder="978...">
+
+    <label for="submitted_by">Seu nome (opcional, aparece para todos)</label>
+    <input type="text" id="submitted_by" name="submitted_by">
+
+    {% if captcha_enabled %}
+    <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" style="margin-top:1rem;"></div>
+    {% endif %}
+
+    <button type="submit">Indicar livro</button>
+  </form>
+  {% else %}
+  <p class="hint">Você atingiu o limite de indicações para esta enquete.</p>
+  {% endif %}
+</div>
+{% endblock %}

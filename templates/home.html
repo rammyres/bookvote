@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Criar enquete de livros{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Criar uma enquete de livros</h1>
+  <p class="poll-desc">Primeiro as pessoas indicam livros. Quando as indicações se encerram, a lista vira votação. Quando a votação se encerra, os 3 mais votados vencem.</p>
+
+  <form method="post" action="/polls">
+    <label for="title">Título da enquete</label>
+    <input type="text" id="title" name="title" required placeholder="Ex: Leitura do clube — julho">
+
+    <label for="description">Descrição (opcional)</label>
+    <textarea id="description" name="description" rows="3" placeholder="Regras, tema do mês, etc."></textarea>
+
+    <label for="nomination_end_local">Indicações encerram em</label>
+    <input type="datetime-local" id="nomination_end_local" name="nomination_end_local" required>
+    <p class="hint">Até esse momento, qualquer pessoa com o link pode sugerir livros.</p>
+
+    <label for="voting_end_local">Votação encerra em</label>
+    <input type="datetime-local" id="voting_end_local" name="voting_end_local" required>
+    <p class="hint">Entre o fim das indicações e este momento, a lista fica travada e vira enquete.</p>
+
+    <label for="max_noms_per_voter">Máximo de indicações por pessoa</label>
+    <input type="number" id="max_noms_per_voter" name="max_noms_per_voter" value="3" min="1" max="20">
+
+    <input type="hidden" name="tz_offset" value="0">
+    <button type="submit">Criar enquete</button>
+  </form>
+</div>
+{% endblock %}

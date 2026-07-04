@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ poll.title }} — votação{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="phase-tabs">
+    <span class="phase-tab">Indicações</span>
+    <span class="phase-tab active">Votação</span>
+    <span class="phase-tab">Resultado</span>
+  </div>
+
+  <h1>{{ poll.title }}</h1>
+  {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
+
+  <div class="meta-row">
+    <span>Votação encerra em <strong data-utc="{{ poll.voting_end.isoformat() }}Z"></strong></span>
+    <span>faltam <span data-countdown="{{ poll.voting_end.isoformat() }}Z"></span></span>
+  </div>
+
+  <p class="hint">A lista de livros está travada. Marque quantos quiser — você pode voltar aqui e mudar seus votos até o encerramento.</p>
+
+  <form method="post" action="/p/{{ poll.id }}/vote">
+    {% for b in books %}
+    <label class="book-check" style="text-transform:none; font-weight:400; margin:0;">
+      <input type="checkbox" name="book_ids" value="{{ b.id }}" {% if b.id in my_votes %}checked{% endif %}>
+      <span>
+        <span class="title">{{ b.title }}</span><br>
+        {% if b.author %}<span class="author">{{ b.author }}</span>{% endif %}
+      </span>
+    </label>
+    {% endfor %}
+
+    {% if captcha_enabled %}
+    <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" style="margin-top:1.25rem;"></div>
+    {% endif %}
+
+    <button type="submit">Confirmar votos</button>
+  </form>
+</div>
+{% endblock %}
