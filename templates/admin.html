@@ -48,9 +48,14 @@
 
   {% if not results.resolved %}
   <div class="tie-banner">
-    Empate na última vaga do top 3 entre {{ results.tie_group|length }} livros. Realize o sorteio para definir o vencedor — o resultado fica registrado e pode ser conferido por qualquer pessoa.
+    Empate entre {{ results.tie_group|length }} livros disputando {{ results.slots_needed }} vaga{{ 's' if results.slots_needed != 1 else '' }} restante{{ 's' if results.slots_needed != 1 else '' }} no top 3. O sorteio ocorre <strong>somente</strong> entre esses livros empatados — o resto do top 3 já está definido. O resultado fica registrado e pode ser conferido por qualquer pessoa.
   </div>
-  <form method="post" action="/admin/{{ poll.admin_token }}/draw" onsubmit="return confirm('Realizar o sorteio de desempate agora? Essa ação não pode ser refeita.');">
+  <ul class="book-list">
+    {% for t in results.tie_group %}
+    <li><span class="title">{{ t.book.title }}</span> <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span></li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/admin/{{ poll.admin_token }}/draw" onsubmit="return confirm('Realizar o sorteio de desempate agora, apenas entre os livros empatados listados acima? Essa ação não pode ser refeita.');">
     <button type="submit">Realizar sorteio</button>
   </form>
   {% else %}

@@ -109,7 +109,7 @@ class DrawLog(Base):
     poll_id = Column(String, ForeignKey("polls.id"), nullable=False, index=True)
     candidates_json = Column(Text, nullable=False)
     seed = Column(String, nullable=False)
-    winner_book_id = Column(String, nullable=False)
+    winner_book_ids_json = Column(Text, nullable=False)
     created_at = Column(DateTime, default=utcnow)
 
     poll = relationship("Poll", back_populates="draws")

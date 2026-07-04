@@ -13,7 +13,7 @@
 
   {% if not results.resolved %}
   <div class="tie-banner">
-    Há empate na última vaga do top 3. O organizador precisa realizar o sorteio para definir o resultado final.
+    Há empate entre {{ results.tie_group|length }} livros disputando {{ results.slots_needed }} vaga{{ 's' if results.slots_needed != 1 else '' }} restante{{ 's' if results.slots_needed != 1 else '' }} no top 3. O organizador precisa realizar o sorteio — apenas entre esses livros empatados — para definir o resultado final.
   </div>
   {% endif %}
 
@@ -28,11 +28,19 @@
       </div>
     </div>
     {% endfor %}
+    {% if not results.resolved %}
+    {% for _ in range(results.slots_needed) %}
+    <div class="spine-row">
+      <span class="spine-rank">?</span>
+      <div class="spine" style="width: 40%; opacity:0.5;"><span>aguardando sorteio</span></div>
+    </div>
+    {% endfor %}
+    {% endif %}
   </div>
 
   {% if results.draw %}
   <div class="draw-audit">
-    Sorteio realizado para desempate — candidatos: {{ results.draw.candidates_json }} · seed: {{ results.draw.seed }} · vencedor: {{ results.draw.winner_book_id }}
+    Sorteio de desempate — participantes (apenas os empatados): {{ results.draw.candidates_json }} · seed: {{ results.draw.seed }} · sorteado{{ 's' if results.slots_needed != 1 else '' }}: {{ results.draw.winner_book_ids_json }}
   </div>
   {% endif %}
 

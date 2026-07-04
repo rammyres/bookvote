@@ -70,7 +70,8 @@ Security List/NSG do VCN e no `iptables` da própria instância.
    entrada TCP 80 e 443 de `0.0.0.0/0`.
 
 4. **Configure o domínio**: aponte um registro DNS tipo A para o IP público
-   da VM, e edite `Caddyfile` trocando `seudominio.com.br` pelo seu domínio
+   da VM. O `Caddyfile` traz `seudominio.com.br` como placeholder — você pode
+   editá-lo manualmente ou deixar o script do passo 5 substituir pelo domínio
    real (o Caddy emite certificado HTTPS automaticamente via Let's Encrypt —
    por isso precisa de domínio real e portas 80/443 abertas).
 
@@ -84,15 +85,25 @@ Security List/NSG do VCN e no `iptables` da própria instância.
    e depois volte para o domínio quando for para produção (o cookie de
    votante exige `BOOKVOTE_COOKIE_SECURE=true` só funciona bem em HTTPS).
 
-5. **Configure o `.env`**:
+5. **Configure o `.env` com o script de setup** (gera a chave secreta
+   automaticamente e já pode atualizar o domínio no `Caddyfile`):
    ```bash
    cd ~/bookvote
-   cp .env.example .env
-   python3 -c "import secrets; print(secrets.token_hex(32))"   # cole em BOOKVOTE_SECRET_KEY
-   nano .env
+   ./scripts/setup_env.sh
    ```
-   Para o captcha, crie um site gratuito em
-   https://dash.cloudflare.com/ → Turnstile e cole as duas chaves.
+   Ele pergunta as chaves do Turnstile (crie gratuitamente em
+   https://dash.cloudflare.com/ → Turnstile — pode deixar em branco para
+   testar sem captcha), o limite de votantes por IP e o domínio.
+
+   Para deploy automatizado (sem prompts), passe tudo via flags, por exemplo:
+   ```bash
+   ./scripts/setup_env.sh --yes \
+     --turnstile-site SEU_SITE_KEY --turnstile-secret SEU_SECRET_KEY \
+     --max-voters 8 --domain enquete.seudominio.com.br
+   ```
+   Rodar o script de novo depois não perde a chave secreta já gerada nem
+   as outras configs — ele faz backup do `.env`/`Caddyfile` anteriores e só
+   atualiza o que você passar.
 
 6. **Suba os containers**:
    ```bash

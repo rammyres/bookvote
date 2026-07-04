@@ -300,5 +300,5 @@ def trigger_draw(admin_token: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "A votação ainda não terminou.")
     results = pl.compute_results(db, poll)
     if results.tie_group and not results.draw:
-        pl.run_draw(db, poll, results.tie_group)
+        pl.run_draw(db, poll, results.tie_group, results.slots_needed)
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
