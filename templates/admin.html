@@ -11,18 +11,23 @@
   <div class="admin-link-box" id="public-link">{{ request.url.scheme }}://{{ request.url.netloc }}/p/{{ poll.id }}</div>
 
   <div class="meta-row">
-    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "voting": "Votação", "closed": "Encerrada"}[phase] }}</strong></span>
+    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada"}[phase] }}</strong></span>
   </div>
 
   {% if phase == "nomination" %}
   <p class="hint">Indicações encerram automaticamente em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span>).</p>
-  <form method="post" action="/admin/{{ poll.admin_token }}/end-nomination" onsubmit="return confirm('Encerrar indicações agora e passar para a votação?');">
+  <form method="post" action="/admin/{{ poll.admin_token }}/end-nomination" onsubmit="return confirm('Encerrar indicações agora e passar para a 1ª votação?');">
     <button type="submit" class="secondary">Encerrar indicações agora</button>
   </form>
-  {% elif phase == "voting" %}
-  <p class="hint">Votação encerra automaticamente em <strong data-utc="{{ poll.voting_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.voting_end.isoformat() }}Z"></span>).</p>
-  <form method="post" action="/admin/{{ poll.admin_token }}/end-voting" onsubmit="return confirm('Encerrar a votação agora?');">
-    <button type="submit" class="secondary">Encerrar votação agora</button>
+  {% elif phase == "round1" %}
+  <p class="hint">1ª votação encerra automaticamente em <strong data-utc="{{ poll.round1_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.round1_end.isoformat() }}Z"></span>).</p>
+  <form method="post" action="/admin/{{ poll.admin_token }}/end-round1" onsubmit="return confirm('Encerrar a 1ª votação agora e apurar os finalistas?');">
+    <button type="submit" class="secondary">Encerrar 1ª votação agora</button>
+  </form>
+  {% elif phase == "round2" %}
+  <p class="hint">Votação final encerra automaticamente em <strong data-utc="{{ poll.round2_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.round2_end.isoformat() }}Z"></span>).</p>
+  <form method="post" action="/admin/{{ poll.admin_token }}/end-round2" onsubmit="return confirm('Encerrar a votação final agora?');">
+    <button type="submit" class="secondary">Encerrar votação final agora</button>
   </form>
   {% endif %}
 </div>
@@ -31,42 +36,180 @@
   <h2>Livros indicados ({{ books|length }})</h2>
   <ul class="book-list">
     {% for b in books %}
-    <li>
-      <span class="title">{{ b.title }}</span>
-      {% if b.author %}<span class="author"> — {{ b.author }}</span>{% endif %}
-      {% if results %}<span class="isbn" style="float:right;">
-        {% for t in results.ranked %}{% if t.book.id == b.id %}{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}{% endif %}{% endfor %}
-      </span>{% endif %}
+    <li class="book-row">
+      {% if b.thumbnail_url %}
+      <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ b.title }}</span>
+        {% if b.author %}<span class="author"> — {{ b.author }}</span>{% endif %}
+        {% if b.promoted %}<span class="isbn" style="float:right;">finalista</span>{% endif %}
+      </div>
     </li>
     {% endfor %}
   </ul>
 </div>
 
+{% if round1_tally %}
+<div class="card">
+  <h2>Apuração — 1ª votação (múltipla)</h2>
+  <ul class="book-list">
+    {% for t in round1_tally %}
+    <li class="book-row">
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ t.book.title }}{% if t.book.promoted %} ⭐{% endif %}</span>
+        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="hint">⭐ = seguiu para a votação final (top 3, empates incluídos).</p>
+</div>
+{% endif %}
+
+{% if round2_tally %}
+<div class="card">
+  <h2>Apuração — votação final (única)</h2>
+  <ul class="book-list">
+    {% for t in round2_tally %}
+    <li class="book-row">
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ t.book.title }}</span>
+        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if phase == "closed" and results %}
 <div class="card">
   <h2>Resultado</h2>
 
-  {% if not results.resolved %}
+  {% if results.champion %}
+  <p><strong>Campeão:</strong> {{ results.champion.book.title }} ({{ results.champion.votes }} voto{{ 's' if results.champion.votes != 1 else '' }})</p>
+  {% if results.draw %}<p class="hint">Definido por sorteio de desempate — ver detalhes na página pública.</p>{% endif %}
+  {% elif results.tie_group %}
   <div class="tie-banner">
-    Empate entre {{ results.tie_group|length }} livros disputando {{ results.slots_needed }} vaga{{ 's' if results.slots_needed != 1 else '' }} restante{{ 's' if results.slots_needed != 1 else '' }} no top 3. O sorteio ocorre <strong>somente</strong> entre esses livros empatados — o resto do top 3 já está definido. O resultado fica registrado e pode ser conferido por qualquer pessoa.
+    Empate em 1º lugar entre {{ results.tie_group|length }} livros. Realize o sorteio — apenas entre esses livros — para definir o campeão.
   </div>
   <ul class="book-list">
     {% for t in results.tie_group %}
-    <li><span class="title">{{ t.book.title }}</span> <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span></li>
+    <li class="book-row">
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ t.book.title }}</span>
+        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+      </div>
+    </li>
     {% endfor %}
   </ul>
-  <form method="post" action="/admin/{{ poll.admin_token }}/draw" onsubmit="return confirm('Realizar o sorteio de desempate agora, apenas entre os livros empatados listados acima? Essa ação não pode ser refeita.');">
-    <button type="submit">Realizar sorteio</button>
-  </form>
+
+  <div id="draw-widget" data-candidates='{{ tie_group_json or "[]" }}' data-admin-token="{{ poll.admin_token }}">
+    <div id="draw-reel" class="draw-reel" style="display:none;">
+      <div class="draw-reel-window"><span id="draw-reel-text">?</span></div>
+    </div>
+    <div id="draw-stamp" class="draw-stamp" style="display:none;">
+      <span id="draw-stamp-text" class="draw-stamp-text"></span>
+    </div>
+    <form id="draw-form" method="post" action="/admin/{{ poll.admin_token }}/draw">
+      <button type="submit" id="draw-button">Realizar sorteio</button>
+    </form>
+  </div>
+
+  <script>
+  (function () {
+    var widget = document.getElementById('draw-widget');
+    var form = document.getElementById('draw-form');
+    var button = document.getElementById('draw-button');
+    var reel = document.getElementById('draw-reel');
+    var reelText = document.getElementById('draw-reel-text');
+    var stamp = document.getElementById('draw-stamp');
+    var stampText = document.getElementById('draw-stamp-text');
+    var candidates = [];
+    try { candidates = JSON.parse(widget.dataset.candidates || '[]'); } catch (e) {}
+    var adminToken = widget.dataset.adminToken;
+
+    if (!candidates.length || !form) return; // let the plain form submit normally
+
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (!confirm('Realizar o sorteio de desempate agora, apenas entre os livros empatados listados acima? Essa ação não pode ser refeita.')) return;
+
+      button.disabled = true;
+      button.textContent = 'Sorteando…';
+      reel.style.display = 'flex';
+
+      var startedAt = Date.now();
+      var minDurationMs = 2600;
+
+      var resultPromise = fetch('/admin/' + adminToken + '/draw-json', { method: 'POST' })
+        .then(function (r) { if (!r.ok) throw new Error('draw failed'); return r.json(); });
+
+      var i = 0;
+      var spinTimer;
+      function spin() {
+        reelText.textContent = candidates[i % candidates.length].title;
+        i++;
+        spinTimer = setTimeout(spin, 90);
+      }
+      spin();
+
+      resultPromise.then(function (data) {
+        var wait = Math.max(0, minDurationMs - (Date.now() - startedAt));
+        setTimeout(function () { land(data); }, wait);
+      }).catch(function () {
+        clearTimeout(spinTimer);
+        reel.style.display = 'none';
+        button.disabled = false;
+        button.textContent = 'Realizar sorteio';
+        alert('Não foi possível concluir o sorteio. Tente novamente.');
+      });
+
+      function land(data) {
+        clearTimeout(spinTimer);
+        var steps = 8, step = 0;
+        (function slowSpin() {
+          reelText.textContent = candidates[(i + step) % candidates.length].title;
+          step++;
+          if (step < steps) {
+            setTimeout(slowSpin, 90 + step * 35);
+          } else {
+            reelText.textContent = data.winner_title;
+            setTimeout(reveal, 550);
+          }
+        })();
+
+        function reveal() {
+          reel.style.display = 'none';
+          stamp.style.display = 'flex';
+          stampText.textContent = data.winner_title;
+          stamp.classList.add('stamp-hit');
+          setTimeout(function () { window.location.reload(); }, 2400);
+        }
+      }
+    });
+  })();
+  </script>
   {% else %}
-  <ol>
-    {% for t in top3 %}
-    <li>{{ t.book.title }} — {{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</li>
-    {% endfor %}
-  </ol>
-  {% if results.draw %}
-  <p class="hint">Desempate decidido por sorteio auditável (ver página pública para detalhes).</p>
-  {% endif %}
+  <p class="hint">Nenhum voto registrado na votação final.</p>
   {% endif %}
 
   <a class="btn secondary" href="/p/{{ poll.id }}">Ver página pública de resultado</a>

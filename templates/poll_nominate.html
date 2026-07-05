@@ -4,7 +4,8 @@
 <div class="card">
   <div class="phase-tabs">
     <span class="phase-tab active">Indicações</span>
-    <span class="phase-tab">Votação</span>
+    <span class="phase-tab">Votação 1</span>
+    <span class="phase-tab">Votação 2</span>
     <span class="phase-tab">Resultado</span>
   </div>
 
@@ -20,10 +21,16 @@
   {% if books %}
   <ul class="book-list">
     {% for b in books %}
-    <li>
-      <div class="title">{{ b.title }}</div>
-      {% if b.author %}<div class="author">{{ b.author }}</div>{% endif %}
-      {% if b.isbn %}<div class="isbn">ISBN {{ b.isbn }}</div>{% endif %}
+    <li class="book-row">
+      {% if b.thumbnail_url %}
+      <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ b.title }}</span>
+        {% if b.author %}<br><span class="author">{{ b.author }}</span>{% endif %}
+      </div>
     </li>
     {% endfor %}
   </ul>
@@ -37,15 +44,41 @@
   <p class="hint">Você já indicou {{ my_nom_count }} de {{ poll.max_noms_per_voter }} livros permitidos.</p>
 
   {% if my_nom_count < poll.max_noms_per_voter %}
-  <form method="post" action="/p/{{ poll.id }}/nominate">
-    <label for="title">Título</label>
-    <input type="text" id="title" name="title" required>
+  <form method="post" action="/p/{{ poll.id }}/nominate" id="nominate-form" autocomplete="off">
 
-    <label for="author">Autor (opcional)</label>
-    <input type="text" id="author" name="author">
+    <div id="search-block">
+      <label for="book-query">Livro</label>
+      <div class="book-search-wrap">
+        <input type="text" id="book-query" name="title" required autocomplete="off"
+               placeholder="Digite o título ou autor...">
+        <div id="book-suggestions" class="book-suggestions" hidden></div>
+      </div>
+      <p class="hint" id="book-search-status">Sugestões vêm do Google Books.</p>
 
-    <label for="isbn">ISBN (opcional, evita duplicados)</label>
-    <input type="text" id="isbn" name="isbn" placeholder="978...">
+      <div id="book-preview" class="book-preview" hidden>
+        <img id="book-preview-thumb" class="book-thumb" alt="">
+        <div>
+          <div id="book-preview-title" class="title"></div>
+          <div id="book-preview-author" class="author"></div>
+        </div>
+      </div>
+
+      <p class="hint"><a href="#" id="go-manual">Não encontrou seu livro? Clique aqui e inclua ele manualmente.</a></p>
+    </div>
+
+    <div id="manual-block" hidden>
+      <label for="manual-title">Título</label>
+      <input type="text" id="manual-title" name="title" disabled placeholder="Título do livro">
+
+      <label for="manual-author">Autor (opcional)</label>
+      <input type="text" id="manual-author" name="author" disabled placeholder="Autor">
+
+      <p class="hint"><a href="#" id="go-search">Voltar para a busca automática</a></p>
+    </div>
+
+    <input type="hidden" id="book-author" name="author" value="">
+    <input type="hidden" id="book-isbn" name="isbn" value="">
+    <input type="hidden" id="book-thumb" name="thumbnail_url" value="">
 
     <label for="submitted_by">Seu nome (opcional, aparece para todos)</label>
     <input type="text" id="submitted_by" name="submitted_by">
@@ -56,6 +89,167 @@
 
     <button type="submit">Indicar livro</button>
   </form>
+
+  <script>
+  (function () {
+    var query = document.getElementById('book-query');
+    if (!query) return;
+
+    var box = document.getElementById('book-suggestions');
+    var status = document.getElementById('book-search-status');
+    var preview = document.getElementById('book-preview');
+    var previewThumb = document.getElementById('book-preview-thumb');
+    var previewTitle = document.getElementById('book-preview-title');
+    var previewAuthor = document.getElementById('book-preview-author');
+
+    var authorHidden = document.getElementById('book-author');
+    var isbnHidden = document.getElementById('book-isbn');
+    var thumbHidden = document.getElementById('book-thumb');
+
+    var searchBlock = document.getElementById('search-block');
+    var manualBlock = document.getElementById('manual-block');
+    var manualTitle = document.getElementById('manual-title');
+    var manualAuthor = document.getElementById('manual-author');
+    var goManual = document.getElementById('go-manual');
+    var goSearch = document.getElementById('go-search');
+
+    var debounceTimer, controller;
+    var defaultStatus = status.textContent;
+
+    function clearSelection() {
+      authorHidden.value = '';
+      isbnHidden.value = '';
+      thumbHidden.value = '';
+      preview.hidden = true;
+    }
+
+    function renderSuggestions(items) {
+      box.innerHTML = '';
+      if (!items || !items.length) {
+        box.hidden = true;
+        status.textContent = 'Nenhum resultado encontrado — pode digitar o título manualmente.';
+        return;
+      }
+      items.forEach(function (b) {
+        var row = document.createElement('div');
+        row.className = 'book-suggestion';
+
+        var img = document.createElement('img');
+        img.className = 'book-thumb';
+        if (b.thumbnail) { img.src = b.thumbnail; } else { img.style.visibility = 'hidden'; }
+        img.alt = '';
+
+        var text = document.createElement('div');
+        var titleEl = document.createElement('div');
+        titleEl.className = 'title';
+        titleEl.textContent = b.title;
+        text.appendChild(titleEl);
+        if (b.author) {
+          var authorEl = document.createElement('div');
+          authorEl.className = 'author';
+          authorEl.textContent = b.author;
+          text.appendChild(authorEl);
+        }
+
+        row.appendChild(img);
+        row.appendChild(text);
+        row.addEventListener('click', function () { pick(b); });
+        box.appendChild(row);
+      });
+      box.hidden = false;
+      status.textContent = defaultStatus;
+    }
+
+    function pick(b) {
+      query.value = b.title;
+      authorHidden.value = b.author || '';
+      isbnHidden.value = b.isbn || '';
+      thumbHidden.value = b.thumbnail || '';
+      previewTitle.textContent = b.title;
+      previewAuthor.textContent = b.author || '';
+      if (b.thumbnail) {
+        previewThumb.src = b.thumbnail;
+        previewThumb.style.visibility = 'visible';
+      } else {
+        previewThumb.style.visibility = 'hidden';
+      }
+      preview.hidden = false;
+      box.hidden = true;
+    }
+
+    function runSearch(q) {
+      status.textContent = 'Buscando…';
+      fetch('/api/book-search?q=' + encodeURIComponent(q), { signal: controller.signal })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(renderSuggestions)
+        .catch(function (err) {
+          if (err.name === 'AbortError') return;
+          console.error('Busca de livros falhou:', err);
+          box.hidden = true;
+          status.textContent = 'Não foi possível buscar sugestões agora. Você pode digitar o título manualmente e indicar assim mesmo.';
+        });
+    }
+
+    query.addEventListener('input', function () {
+      clearSelection();
+      var q = query.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 2) { box.hidden = true; status.textContent = defaultStatus; return; }
+      debounceTimer = setTimeout(function () {
+        if (controller) controller.abort();
+        controller = new AbortController();
+        runSearch(q);
+      }, 350);
+    });
+
+    // Enter picks the top suggestion instead of submitting the form early;
+    // with no suggestions showing, Enter still submits normally (manual title).
+    query.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && !box.hidden && box.children.length) {
+        ev.preventDefault();
+        box.children[0].click();
+      }
+    });
+
+    document.addEventListener('click', function (ev) {
+      if (ev.target !== query && !box.contains(ev.target)) box.hidden = true;
+    });
+
+    // --- manual entry toggle, keeps the book row consistent (isbn/thumbnail = null) ---
+    function enableManual() {
+      searchBlock.hidden = true;
+      manualBlock.hidden = false;
+      query.disabled = true;
+      query.required = false;
+      authorHidden.disabled = true;
+      clearSelection();
+      manualTitle.disabled = false;
+      manualAuthor.disabled = false;
+      manualTitle.required = true;
+      manualTitle.focus();
+    }
+
+    function enableSearch() {
+      manualBlock.hidden = true;
+      searchBlock.hidden = false;
+      manualTitle.disabled = true;
+      manualAuthor.disabled = true;
+      manualTitle.required = false;
+      manualTitle.value = '';
+      manualAuthor.value = '';
+      authorHidden.disabled = false;
+      query.disabled = false;
+      query.required = true;
+      query.focus();
+    }
+
+    goManual.addEventListener('click', function (ev) { ev.preventDefault(); enableManual(); });
+    goSearch.addEventListener('click', function (ev) { ev.preventDefault(); enableSearch(); });
+  })();
+  </script>
   {% else %}
   <p class="hint">Você atingiu o limite de indicações para esta enquete.</p>
   {% endif %}

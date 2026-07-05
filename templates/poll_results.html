@@ -4,55 +4,58 @@
 <div class="card">
   <div class="phase-tabs">
     <span class="phase-tab">Indicações</span>
-    <span class="phase-tab">Votação</span>
+    <span class="phase-tab">Votação 1</span>
+    <span class="phase-tab">Votação 2</span>
     <span class="phase-tab active">Resultado</span>
   </div>
 
   <h1>{{ poll.title }}</h1>
   <p class="hint">Votação encerrada.</p>
 
-  {% if not results.resolved %}
-  <div class="tie-banner">
-    Há empate entre {{ results.tie_group|length }} livros disputando {{ results.slots_needed }} vaga{{ 's' if results.slots_needed != 1 else '' }} restante{{ 's' if results.slots_needed != 1 else '' }} no top 3. O organizador precisa realizar o sorteio — apenas entre esses livros empatados — para definir o resultado final.
-  </div>
-  {% endif %}
-
-  <h2>Top 3</h2>
-  <div class="shelf">
-    {% for t in top3 %}
-    <div class="spine-row">
-      <span class="spine-rank">{{ loop.index }}º</span>
-      <div class="spine" style="width: {{ 40 + (60 * (t.votes / (results.ranked[0].votes or 1))) }}%;">
-        <span>{{ t.book.title }}</span>
-        <span class="count">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
-      </div>
-    </div>
-    {% endfor %}
-    {% if not results.resolved %}
-    {% for _ in range(results.slots_needed) %}
-    <div class="spine-row">
-      <span class="spine-rank">?</span>
-      <div class="spine" style="width: 40%; opacity:0.5;"><span>aguardando sorteio</span></div>
-    </div>
-    {% endfor %}
+  {% if results.champion %}
+  <h2 style="margin-top:1.5rem;">📖 Livro escolhido</h2>
+  <div class="spine-row">
+    {% if results.champion.book.thumbnail_url %}
+    <img src="{{ results.champion.book.thumbnail_url }}" alt="" class="book-thumb" style="width:2.6rem; height:3.8rem; min-width:2.6rem;">
     {% endif %}
+    <span class="spine" style="width:80%; height:2.6rem; font-size:1rem;">
+      <span>{{ results.champion.book.title }}</span>
+      <span class="count">{{ results.champion.votes }} voto{{ 's' if results.champion.votes != 1 else '' }}</span>
+    </span>
   </div>
+  {% if results.champion.book.author %}<p class="hint">{{ results.champion.book.author }}</p>{% endif %}
+  {% elif results.tie_group %}
+  <div class="tie-banner">
+    Empate em 1º lugar entre {{ results.tie_group|length }} livros. O organizador precisa realizar o sorteio — apenas entre esses livros empatados — para definir o campeão.
+  </div>
+  {% else %}
+  <p class="hint">Ainda não há votos suficientes para apurar um resultado.</p>
+  {% endif %}
 
   {% if results.draw %}
   <div class="draw-audit">
-    Sorteio de desempate — participantes (apenas os empatados): {{ results.draw.candidates_json }} · seed: {{ results.draw.seed }} · sorteado{{ 's' if results.slots_needed != 1 else '' }}: {{ results.draw.winner_book_ids_json }}
+    Sorteio de desempate — participantes (apenas os empatados em 1º): {{ results.draw.candidates_json }} · seed: {{ results.draw.seed }} · sorteado: {{ results.draw.winner_book_ids_json }}
   </div>
   {% endif %}
 
-  <h2 style="margin-top:2rem;">Apuração completa</h2>
+  {% if results.ranked %}
+  <h2 style="margin-top:2rem;">Finalistas (votação final)</h2>
   <ul class="book-list">
     {% for t in results.ranked %}
-    <li>
-      <span class="title">{{ t.book.title }}</span>
-      <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span><br>
-      {% if t.book.author %}<span class="author">{{ t.book.author }}</span>{% endif %}
+    <li class="book-row">
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ t.book.title }}</span>
+        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        {% if t.book.author %}<br><span class="author">{{ t.book.author }}</span>{% endif %}
+      </div>
     </li>
     {% endfor %}
   </ul>
+  {% endif %}
 </div>
 {% endblock %}

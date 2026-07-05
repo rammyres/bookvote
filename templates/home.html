@@ -3,7 +3,7 @@
 {% block content %}
 <div class="card">
   <h1>Criar uma enquete de livros</h1>
-  <p class="poll-desc">Primeiro as pessoas indicam livros. Quando as indicações se encerram, a lista vira votação. Quando a votação se encerra, os 3 mais votados vencem.</p>
+  <p class="poll-desc">1ª fase: qualquer pessoa indica livros. 2ª fase: todo mundo vota em quantos livros quiser. 3ª fase: só os 3 mais votados (empates incluídos) disputam um voto único por pessoa, valendo o campeão.</p>
 
   <form method="post" action="/polls">
     <label for="title">Título da enquete</label>
@@ -16,9 +16,13 @@
     <input type="datetime-local" id="nomination_end_local" name="nomination_end_local" required>
     <p class="hint">Até esse momento, qualquer pessoa com o link pode sugerir livros.</p>
 
-    <label for="voting_end_local">Votação encerra em</label>
-    <input type="datetime-local" id="voting_end_local" name="voting_end_local" required>
-    <p class="hint">Entre o fim das indicações e este momento, a lista fica travada e vira enquete.</p>
+    <label for="round1_end_local">1ª votação encerra em</label>
+    <input type="datetime-local" id="round1_end_local" name="round1_end_local" required>
+    <p class="hint">Todos os livros indicados entram nessa votação; cada pessoa marca quantos quiser.</p>
+
+    <label for="round2_end_local">2ª votação encerra em</label>
+    <input type="datetime-local" id="round2_end_local" name="round2_end_local" required>
+    <p class="hint">Só os 3 mais votados da 1ª fase (empates incluídos) entram aqui; cada pessoa vota em 1 só.</p>
 
     <label for="max_noms_per_voter">Máximo de indicações por pessoa</label>
     <input type="number" id="max_noms_per_voter" name="max_noms_per_voter" value="3" min="1" max="20">

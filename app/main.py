@@ -1,8 +1,9 @@
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request, Response, Form, Depends, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -12,8 +13,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from .database import Base, engine, get_db
-from .models import Book, Poll, Vote, VoterIdentity
+from .models import Book, Poll, Vote, VoterIdentity, gen_short_id
 from . import poll_logic as pl
+from .book_search import search_books
 from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SITE_KEY, CAPTCHA_ENABLED
 
 Base.metadata.create_all(bind=engine)
@@ -75,6 +77,12 @@ def get_poll_by_admin_token_or_404(db: Session, admin_token: str) -> Poll:
     return poll
 
 
+def carry_cookie(source: Response, target):
+    if "set-cookie" in source.headers:
+        target.headers["set-cookie"] = source.headers["set-cookie"]
+    return target
+
+
 # ---------------------------------------------------------------- home / create
 
 @app.get("/", response_class=HTMLResponse)
@@ -89,28 +97,44 @@ def create_poll(
     title: str = Form(...),
     description: str = Form(""),
     nomination_end_local: str = Form(...),
-    voting_end_local: str = Form(...),
+    round1_end_local: str = Form(...),
+    round2_end_local: str = Form(...),
     tz_offset: int = Form(0),
     max_noms_per_voter: int = Form(3),
     db: Session = Depends(get_db),
 ):
     nomination_end = parse_local_datetime(nomination_end_local, tz_offset)
-    voting_end = parse_local_datetime(voting_end_local, tz_offset)
+    round1_end = parse_local_datetime(round1_end_local, tz_offset)
+    round2_end = parse_local_datetime(round2_end_local, tz_offset)
 
-    if voting_end <= nomination_end:
-        raise HTTPException(400, "O fim da votação precisa ser depois do fim das indicações.")
     if nomination_end <= pl.now():
         raise HTTPException(400, "O fim das indicações precisa ser no futuro.")
+    if round1_end <= nomination_end:
+        raise HTTPException(400, "O fim da 1ª votação precisa ser depois do fim das indicações.")
+    if round2_end <= round1_end:
+        raise HTTPException(400, "O fim da 2ª votação precisa ser depois do fim da 1ª votação.")
 
-    poll = Poll(
-        title=title.strip(),
-        description=description.strip(),
-        nomination_end=nomination_end,
-        voting_end=voting_end,
-        max_noms_per_voter=max_noms_per_voter,
-    )
-    db.add(poll)
-    db.commit()
+    poll = None
+    for _ in range(5):
+        candidate = Poll(
+            id=gen_short_id(8),
+            admin_token=gen_short_id(16),
+            title=title.strip(),
+            description=description.strip(),
+            nomination_end=nomination_end,
+            round1_end=round1_end,
+            round2_end=round2_end,
+            max_noms_per_voter=max_noms_per_voter,
+        )
+        db.add(candidate)
+        try:
+            db.commit()
+            poll = candidate
+            break
+        except IntegrityError:
+            db.rollback()
+    if poll is None:
+        raise HTTPException(500, "Não foi possível gerar um link único. Tente novamente.")
     db.refresh(poll)
     return RedirectResponse(url=f"/admin/{poll.admin_token}", status_code=303)
 
@@ -136,24 +160,51 @@ def view_poll(request: Request, poll_id: str, response: Response, db: Session = 
         my_noms = [b for b in books if b.voter_id == voter_id]
         ctx.update(books=books, my_nom_count=len(my_noms))
         html = templates.TemplateResponse("poll_nominate.html", ctx)
-    elif phase == pl.PHASE_VOTING:
+
+    elif phase == pl.PHASE_ROUND1:
         books = db.query(Book).filter(Book.poll_id == poll.id).order_by(Book.title).all()
         my_votes = {
             v.book_id
-            for v in db.query(Vote).filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id).all()
+            for v in db.query(Vote)
+            .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 1)
+            .all()
         }
         ctx.update(books=books, my_votes=my_votes)
-        html = templates.TemplateResponse("poll_vote.html", ctx)
+        html = templates.TemplateResponse("poll_vote_round1.html", ctx)
+
+    elif phase == pl.PHASE_ROUND2:
+        pl.ensure_round1_promotion(db, poll)
+        books = (
+            db.query(Book)
+            .filter(Book.poll_id == poll.id, Book.promoted.is_(True))
+            .order_by(Book.title)
+            .all()
+        )
+        my_vote = (
+            db.query(Vote)
+            .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 2)
+            .first()
+        )
+        ctx.update(books=books, my_book_id=my_vote.book_id if my_vote else None)
+        html = templates.TemplateResponse("poll_vote_round2.html", ctx)
+
     else:
-        results = pl.compute_results(db, poll)
-        top3 = pl.final_top3(results)
-        ctx.update(results=results, top3=top3)
+        pl.ensure_round1_promotion(db, poll)
+        results = pl.compute_final_results(db, poll)
+        ctx.update(results=results)
         html = templates.TemplateResponse("poll_results.html", ctx)
 
-    # carry over the Set-Cookie header set by get_or_set_voter_id, if any
-    if "set-cookie" in response.headers:
-        html.headers["set-cookie"] = response.headers["set-cookie"]
-    return html
+    return carry_cookie(response, html)
+
+
+@app.get("/api/book-search")
+@limiter.limit("30/minute")
+async def api_book_search(request: Request, q: str = ""):
+    q = q.strip()
+    if len(q) < 2:
+        return JSONResponse([])
+    results = await search_books(q)
+    return JSONResponse(results)
 
 
 @app.post("/p/{poll_id}/nominate")
@@ -164,6 +215,7 @@ async def nominate(
     title: str = Form(...),
     author: str = Form(""),
     isbn: str = Form(""),
+    thumbnail_url: str = Form(""),
     submitted_by: str = Form(""),
     cf_turnstile_response: str = Form(default="", alias="cf-turnstile-response"),
     db: Session = Depends(get_db),
@@ -192,11 +244,16 @@ async def nominate(
         if dup:
             raise HTTPException(400, "Esse ISBN já foi indicado.")
 
+    thumb_clean = thumbnail_url.strip()
+    if not (thumb_clean.startswith("http://") or thumb_clean.startswith("https://")):
+        thumb_clean = None
+
     book = Book(
         poll_id=poll.id,
         title=title.strip(),
         author=author.strip() or None,
         isbn=isbn_clean,
+        thumbnail_url=thumb_clean,
         submitted_by=submitted_by.strip() or None,
         voter_id=voter_id,
     )
@@ -207,15 +264,12 @@ async def nominate(
         db.rollback()
         raise HTTPException(400, "Esse livro já foi indicado.")
 
-    redirect = RedirectResponse(url=f"/p/{poll_id}", status_code=303)
-    if "set-cookie" in response.headers:
-        redirect.headers["set-cookie"] = response.headers["set-cookie"]
-    return redirect
+    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
 
 
-@app.post("/p/{poll_id}/vote")
+@app.post("/p/{poll_id}/vote-round1")
 @limiter.limit("20/minute")
-async def vote(
+async def vote_round1(
     request: Request,
     poll_id: str,
     book_ids: list[str] = Form(default=[]),
@@ -223,8 +277,8 @@ async def vote(
     db: Session = Depends(get_db),
 ):
     poll = get_poll_or_404(db, poll_id)
-    if pl.get_phase(poll) != pl.PHASE_VOTING:
-        raise HTTPException(400, "O período de votação não está ativo.")
+    if pl.get_phase(poll) != pl.PHASE_ROUND1:
+        raise HTTPException(400, "A 1ª fase de votação não está ativa.")
 
     if not await verify_captcha(cf_turnstile_response, request):
         raise HTTPException(400, "Falha na verificação anti-robô. Tente novamente.")
@@ -240,17 +294,59 @@ async def vote(
         b.id for b in db.query(Book.id).filter(Book.poll_id == poll.id, Book.id.in_(book_ids)).all()
     }
 
-    # Replace this voter's ballot with the newly submitted selection, so
-    # people can change their mind up until the deadline.
-    db.query(Vote).filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id).delete()
+    # Replace this voter's round-1 ballot so people can change their mind
+    # up until the deadline; round-2 votes (a different `round`) are untouched.
+    db.query(Vote).filter(
+        Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 1
+    ).delete()
     for book_id in valid_ids:
-        db.add(Vote(poll_id=poll.id, book_id=book_id, voter_id=voter_id, ip_hash=ip_h))
+        db.add(Vote(poll_id=poll.id, book_id=book_id, voter_id=voter_id, ip_hash=ip_h, round=1))
     db.commit()
 
-    redirect = RedirectResponse(url=f"/p/{poll_id}", status_code=303)
-    if "set-cookie" in response.headers:
-        redirect.headers["set-cookie"] = response.headers["set-cookie"]
-    return redirect
+    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
+
+
+@app.post("/p/{poll_id}/vote-round2")
+@limiter.limit("20/minute")
+async def vote_round2(
+    request: Request,
+    poll_id: str,
+    book_id: str = Form(...),
+    cf_turnstile_response: str = Form(default="", alias="cf-turnstile-response"),
+    db: Session = Depends(get_db),
+):
+    poll = get_poll_or_404(db, poll_id)
+    if pl.get_phase(poll) != pl.PHASE_ROUND2:
+        raise HTTPException(400, "A 2ª fase de votação não está ativa.")
+
+    pl.ensure_round1_promotion(db, poll)
+
+    if not await verify_captcha(cf_turnstile_response, request):
+        raise HTTPException(400, "Falha na verificação anti-robô. Tente novamente.")
+
+    response = Response()
+    voter_id = get_or_set_voter_id(request, response)
+    ip_h = hash_ip(request, poll.id)
+
+    if not register_voter_identity(db, poll.id, ip_h, voter_id):
+        raise HTTPException(429, "Muitos votantes distintos a partir desta rede. Fale com o organizador.")
+
+    book = (
+        db.query(Book)
+        .filter(Book.id == book_id, Book.poll_id == poll.id, Book.promoted.is_(True))
+        .first()
+    )
+    if not book:
+        raise HTTPException(400, "Livro inválido para a 2ª fase.")
+
+    # single choice: replace any previous round-2 vote from this voter
+    db.query(Vote).filter(
+        Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 2
+    ).delete()
+    db.add(Vote(poll_id=poll.id, book_id=book.id, voter_id=voter_id, ip_hash=ip_h, round=2))
+    db.commit()
+
+    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
 
 
 # --------------------------------------------------------------------------- admin
@@ -259,8 +355,25 @@ async def vote(
 def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
     phase = pl.get_phase(poll)
+
+    round1_tally = pl.tally(db, poll.id, round=1) if phase != pl.PHASE_NOMINATION else []
+    round2_tally = None
+    results = None
+
+    if phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
+        pl.ensure_round1_promotion(db, poll)
+        round2_tally = pl.tally(db, poll.id, round=2, promoted_only=True)
+    if phase == pl.PHASE_CLOSED:
+        results = pl.compute_final_results(db, poll)
+
+    tie_group_json = None
+    if results and results.tie_group:
+        tie_group_json = json.dumps(
+            [{"id": t.book.id, "title": t.book.title} for t in results.tie_group]
+        )
+
     books = db.query(Book).filter(Book.poll_id == poll.id).order_by(Book.created_at).all()
-    results = pl.compute_results(db, poll) if phase == pl.PHASE_CLOSED else None
+
     return templates.TemplateResponse(
         "admin.html",
         {
@@ -268,8 +381,10 @@ def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(ge
             "poll": poll,
             "phase": phase,
             "books": books,
+            "round1_tally": round1_tally,
+            "round2_tally": round2_tally,
             "results": results,
-            "top3": pl.final_top3(results) if results else None,
+            "tie_group_json": tie_group_json,
         },
     )
 
@@ -283,12 +398,25 @@ def end_nomination(admin_token: str, db: Session = Depends(get_db)):
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 
-@app.post("/admin/{admin_token}/end-voting")
-def end_voting(admin_token: str, db: Session = Depends(get_db)):
+@app.post("/admin/{admin_token}/end-round1")
+def end_round1(admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
-    if pl.get_phase(poll) in (pl.PHASE_NOMINATION, pl.PHASE_VOTING):
-        poll.nomination_end = min(poll.nomination_end, pl.now())
-        poll.voting_end = pl.now()
+    if pl.get_phase(poll) in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1):
+        t = pl.now()
+        poll.nomination_end = min(pl.as_aware(poll.nomination_end), t)
+        poll.round1_end = t
+        db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/end-round2")
+def end_round2(admin_token: str, db: Session = Depends(get_db)):
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2):
+        t = pl.now()
+        poll.nomination_end = min(pl.as_aware(poll.nomination_end), t)
+        poll.round1_end = min(pl.as_aware(poll.round1_end), t)
+        poll.round2_end = t
         db.commit()
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
@@ -297,8 +425,35 @@ def end_voting(admin_token: str, db: Session = Depends(get_db)):
 def trigger_draw(admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
     if pl.get_phase(poll) != pl.PHASE_CLOSED:
-        raise HTTPException(400, "A votação ainda não terminou.")
-    results = pl.compute_results(db, poll)
+        raise HTTPException(400, "A 2ª votação ainda não terminou.")
+    pl.ensure_round1_promotion(db, poll)
+    results = pl.compute_final_results(db, poll)
     if results.tie_group and not results.draw:
-        pl.run_draw(db, poll, results.tie_group, results.slots_needed)
+        pl.run_champion_draw(db, poll, results.tie_group)
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/draw-json")
+def trigger_draw_json(admin_token: str, db: Session = Depends(get_db)):
+    """Same draw as /draw, but returns the outcome as JSON so the admin
+    dashboard can drive a suspense animation before reloading. Running the
+    draw twice is safe: compute_final_results/run_champion_draw only ever
+    draws once per poll and reuses the stored DrawLog afterwards."""
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) != pl.PHASE_CLOSED:
+        raise HTTPException(400, "A 2ª votação ainda não terminou.")
+    pl.ensure_round1_promotion(db, poll)
+    results = pl.compute_final_results(db, poll)
+    if not results.tie_group:
+        raise HTTPException(400, "Não há empate para sortear.")
+    if not results.draw:
+        pl.run_champion_draw(db, poll, results.tie_group)
+        results = pl.compute_final_results(db, poll)
+
+    return JSONResponse(
+        {
+            "candidates": [{"id": t.book.id, "title": t.book.title} for t in results.tie_group],
+            "winner_id": results.champion.book.id if results.champion else None,
+            "winner_title": results.champion.book.title if results.champion else None,
+        }
+    )

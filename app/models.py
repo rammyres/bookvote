@@ -1,3 +1,5 @@
+import secrets
+import string
 import uuid
 from datetime import datetime, timezone
 
@@ -8,15 +10,24 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Text,
+    Boolean,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
 from .database import Base
 
+_SHORT_ID_ALPHABET = string.ascii_letters + string.digits  # base62
+
 
 def gen_id() -> str:
     return uuid.uuid4().hex
+
+
+def gen_short_id(length: int) -> str:
+    """Random base62 id for URL-facing identifiers. Uses secrets (CSPRNG),
+    which matters for admin_token since that's a bearer credential."""
+    return "".join(secrets.choice(_SHORT_ID_ALPHABET) for _ in range(length))
 
 
 def utcnow() -> datetime:
@@ -26,13 +37,24 @@ def utcnow() -> datetime:
 class Poll(Base):
     __tablename__ = "polls"
 
-    id = Column(String, primary_key=True, default=gen_id)
+    # 8 chars base62 ≈ 2.2e14 combinations — plenty for a small tool's poll
+    # link, and short enough to read out loud or type by hand.
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
     title = Column(String, nullable=False)
     description = Column(Text, default="")
-    admin_token = Column(String, unique=True, default=gen_id, nullable=False, index=True)
+    # 16 chars base62 ≈ 95 bits of entropy — this is a bearer credential
+    # (whoever has it administers the poll), so it stays much longer than
+    # the poll id despite also being shortened from the original UUID.
+    admin_token = Column(
+        String, unique=True, default=lambda: gen_short_id(16), nullable=False, index=True
+    )
 
     nomination_end = Column(DateTime, nullable=False)
-    voting_end = Column(DateTime, nullable=False)
+    round1_end = Column(DateTime, nullable=False)  # multi-vote, all nominated books
+    round2_end = Column(DateTime, nullable=False)  # single-vote, only promoted books
+
+    # set once, the first time anyone loads the poll after round1_end passes
+    round1_promoted = Column(Boolean, default=False, nullable=False)
 
     # optional per-voter limits (anti-flood, not anti-bot per se)
     max_noms_per_voter = Column(Integer, default=3)
@@ -53,8 +75,12 @@ class Book(Base):
     isbn = Column(String, nullable=True)
     title = Column(String, nullable=False)
     author = Column(String, nullable=True)
+    thumbnail_url = Column(String, nullable=True)
     submitted_by = Column(String, nullable=True)  # display name, optional
     voter_id = Column(String, nullable=True, index=True)  # who nominated it
+
+    # True for books that advanced to round 2 (top 3 of round 1, ties included)
+    promoted = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=utcnow)
 
@@ -65,7 +91,7 @@ class Book(Base):
 class Vote(Base):
     __tablename__ = "votes"
     __table_args__ = (
-        UniqueConstraint("book_id", "voter_id", name="uq_vote_book_voter"),
+        UniqueConstraint("book_id", "voter_id", "round", name="uq_vote_book_voter_round"),
     )
 
     id = Column(String, primary_key=True, default=gen_id)
@@ -73,6 +99,7 @@ class Vote(Base):
     book_id = Column(String, ForeignKey("books.id"), nullable=False, index=True)
     voter_id = Column(String, nullable=False, index=True)
     ip_hash = Column(String, nullable=False, index=True)
+    round = Column(Integer, nullable=False)  # 1 = multi-vote phase, 2 = single-vote phase
 
     created_at = Column(DateTime, default=utcnow)
 

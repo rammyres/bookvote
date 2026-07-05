@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ poll.title }} — votação final{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="phase-tabs">
+    <span class="phase-tab">Indicações</span>
+    <span class="phase-tab">Votação 1</span>
+    <span class="phase-tab active">Votação 2</span>
+    <span class="phase-tab">Resultado</span>
+  </div>
+
+  <h1>{{ poll.title }}</h1>
+  {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
+
+  <div class="meta-row">
+    <span>Votação final encerra em <strong data-utc="{{ poll.round2_end.isoformat() }}Z"></strong></span>
+    <span>faltam <span data-countdown="{{ poll.round2_end.isoformat() }}Z"></span></span>
+  </div>
+
+  <p class="hint">Estes são os finalistas da 1ª votação. Escolha apenas 1 — o mais votado aqui é o campeão. Você pode voltar e trocar seu voto até o encerramento.</p>
+
+  <form method="post" action="/p/{{ poll.id }}/vote-round2">
+    {% for b in books %}
+    <label class="book-check" style="text-transform:none; font-weight:400; margin:0;">
+      <input type="radio" name="book_id" value="{{ b.id }}" required {% if b.id == my_book_id %}checked{% endif %}>
+      {% if b.thumbnail_url %}
+      <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <span class="title">{{ b.title }}</span>
+    </label>
+    {% endfor %}
+
+    {% if captcha_enabled %}
+    <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" style="margin-top:1.25rem;"></div>
+    {% endif %}
+
+    <button type="submit">Confirmar meu voto</button>
+  </form>
+</div>
+{% endblock %}

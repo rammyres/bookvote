@@ -1,22 +1,51 @@
 # Enquete de Livros
 
 Ferramenta pequena para clubes de leitura: indicação de livros → votação
-(marca quantos quiser) → resultado com top 3 e sorteio auditável em caso de
-empate. Feito em FastAPI + SQLite, sem contas de usuário.
+múltipla (1ª fase) → votação única entre os 3 finalistas (2ª fase) →
+campeão, com sorteio auditável em caso de empate. Feito em FastAPI + SQLite,
+sem contas de usuário.
 
 ## Como funciona
 
 - **Indicações**: qualquer pessoa com o link público sugere livros até o
-  horário definido pelo organizador. Cada pessoa tem um limite configurável
-  de indicações.
-- **Votação**: a lista trava e vira enquete. Cada visitante pode marcar
-  quantos livros quiser e voltar para trocar o voto até o prazo acabar.
-- **Resultado**: ao encerrar, os 3 mais votados aparecem. Se houver empate
-  na última vaga do top 3, o organizador aciona um sorteio; o resultado do
-  sorteio fica registrado (candidatos + seed + vencedor) para qualquer
-  pessoa conferir na página pública.
+  horário definido pelo organizador. Em vez de campos separados de título,
+  autor e ISBN, a pessoa digita num único campo e a página sugere livros
+  em tempo real usando o Google Books (título, autor, ISBN e capa vêm
+  prontos ao clicar numa sugestão). Não achou o livro? Pode digitar
+  qualquer texto e indicar assim mesmo, sem capa. Cada pessoa tem um limite
+  configurável de indicações.
+- **Votação 1 (múltipla)**: a lista trava e todos os livros indicados entram
+  na enquete, exibidos com capa (quando disponível) + nome. Cada visitante
+  marca quantos livros quiser e pode voltar para trocar o voto até o prazo
+  acabar.
+- **Votação 2 (única)**: ao encerrar a votação 1, os 3 mais votados avançam
+  — se houver empate na 3ª vaga, **todos** os empatados avançam (pode virar
+  4, 5 finalistas, etc.). Nessa fase cada pessoa vota em só 1 livro entre os
+  finalistas.
+- **Resultado**: o mais votado na votação 2 é o campeão. Se houver empate em
+  1º lugar, o organizador aciona o sorteio pelo painel — uma animação de
+  roleta gira só entre os livros empatados e termina com um "selo" no
+  vencedor real — restrito aos livros empatados (nunca a lista inteira). O
+  sorteio fica registrado (candidatos + seed + sorteado) para qualquer
+  pessoa conferir na página pública. Sem JavaScript, o mesmo botão ainda
+  funciona (só sem a animação).
 - **Administração**: quem cria a enquete recebe um link secreto de admin
   (`/admin/<token>`) para encerrar fases antes do prazo e acionar o sorteio.
+- **Links curtos**: o link público usa 8 caracteres (`/p/AbC123xy`) e o link
+  de admin usa 16 (`/admin/<token>`, ~95 bits de entropia — continua sendo
+  um segredo forte, só que mais fácil de copiar e colar do que um UUID).
+
+> **Atenção se você já tinha uma versão anterior rodando**: o esquema do
+> banco mudou (a enquete agora tem 3 prazos — indicações, votação 1, votação
+> 2 — em vez de 2, e os votos guardam a qual rodada pertencem). Isso não é
+> compatível com um `bookvote.db` criado pela versão de uma única votação.
+> Como ainda está em fase de testes, o caminho mais simples é apagar o
+> volume antigo antes de subir a nova versão:
+> ```bash
+> docker compose down
+> docker volume rm bookvote_bookvote_data   # nome pode variar, veja `docker volume ls`
+> docker compose up -d --build
+> ```
 
 ### Controle anti-bot (camadas, sem exigir conta)
 

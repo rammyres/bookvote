@@ -26,6 +26,7 @@ TURNSTILE_SECRET=""
 MAX_VOTERS=""
 DOMAIN=""
 COOKIE_SECURE=""
+GOOGLE_BOOKS_KEY=""
 
 usage() {
   grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,20p'
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --max-voters) MAX_VOTERS="$2"; shift 2 ;;
     --domain) DOMAIN="$2"; shift 2 ;;
     --cookie-secure) COOKIE_SECURE="$2"; shift 2 ;;
+    --google-books-key) GOOGLE_BOOKS_KEY="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Opção desconhecida: $1" >&2; usage; exit 1 ;;
   esac
@@ -71,6 +73,7 @@ EXISTING_TS_SITE=""
 EXISTING_TS_SECRET=""
 EXISTING_MAX_VOTERS="6"
 EXISTING_COOKIE_SECURE="true"
+EXISTING_GOOGLE_BOOKS_KEY=""
 
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -82,6 +85,7 @@ if [[ -f "$ENV_FILE" ]]; then
   EXISTING_TS_SECRET="${TURNSTILE_SECRET_KEY:-}"
   EXISTING_MAX_VOTERS="${BOOKVOTE_MAX_VOTERS_PER_IP:-6}"
   EXISTING_COOKIE_SECURE="${BOOKVOTE_COOKIE_SECURE:-true}"
+  EXISTING_GOOGLE_BOOKS_KEY="${GOOGLE_BOOKS_API_KEY:-}"
   cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%s)"
   echo "Backup do .env anterior salvo em $ENV_FILE.bak.<timestamp>"
 fi
@@ -101,6 +105,9 @@ fi
 if [[ -z "$MAX_VOTERS" ]]; then
   MAX_VOTERS="$(ask "Máximo de votantes distintos por IP/enquete" "$EXISTING_MAX_VOTERS")"
 fi
+if [[ -z "$GOOGLE_BOOKS_KEY" ]]; then
+  GOOGLE_BOOKS_KEY="$(ask "Google Books API key (opcional, deixe em branco para cota pública)" "$EXISTING_GOOGLE_BOOKS_KEY")"
+fi
 if [[ -z "$COOKIE_SECURE" ]]; then
   COOKIE_SECURE="$(ask "Exigir HTTPS para o cookie de votante (true/false)" "$EXISTING_COOKIE_SECURE")"
 fi
@@ -114,6 +121,7 @@ TURNSTILE_SITE_KEY=$TURNSTILE_SITE
 TURNSTILE_SECRET_KEY=$TURNSTILE_SECRET
 BOOKVOTE_COOKIE_SECURE=$COOKIE_SECURE
 BOOKVOTE_MAX_VOTERS_PER_IP=$MAX_VOTERS
+GOOGLE_BOOKS_API_KEY=$GOOGLE_BOOKS_KEY
 EOF
 
 chmod 600 "$ENV_FILE"
