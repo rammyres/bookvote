@@ -9,7 +9,7 @@
 # Uso não-interativo (exemplo):
 #   ./scripts/setup_env.sh --yes \
 #     --turnstile-site 0x4AAxxxxx --turnstile-secret 0x4AAyyyyy \
-#     --max-voters 8 --domain enquete.exemplo.com.br
+#     --max-voters 8 --google-books-key SUA_CHAVE
 #
 # Sempre gera uma BOOKVOTE_SECRET_KEY nova se ainda não existir uma no .env.
 
@@ -18,13 +18,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$ROOT_DIR/.env"
-CADDYFILE="$ROOT_DIR/Caddyfile"
 
 NONINTERACTIVE=false
 TURNSTILE_SITE=""
 TURNSTILE_SECRET=""
 MAX_VOTERS=""
-DOMAIN=""
 COOKIE_SECURE=""
 GOOGLE_BOOKS_KEY=""
 
@@ -38,7 +36,6 @@ while [[ $# -gt 0 ]]; do
     --turnstile-site) TURNSTILE_SITE="$2"; shift 2 ;;
     --turnstile-secret) TURNSTILE_SECRET="$2"; shift 2 ;;
     --max-voters) MAX_VOTERS="$2"; shift 2 ;;
-    --domain) DOMAIN="$2"; shift 2 ;;
     --cookie-secure) COOKIE_SECURE="$2"; shift 2 ;;
     --google-books-key) GOOGLE_BOOKS_KEY="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -111,10 +108,6 @@ fi
 if [[ -z "$COOKIE_SECURE" ]]; then
   COOKIE_SECURE="$(ask "Exigir HTTPS para o cookie de votante (true/false)" "$EXISTING_COOKIE_SECURE")"
 fi
-if [[ -z "$DOMAIN" && "$NONINTERACTIVE" == false ]]; then
-  DOMAIN="$(ask "Domínio para o Caddyfile (deixe em branco para não alterar)" "")"
-fi
-
 cat > "$ENV_FILE" <<EOF
 BOOKVOTE_SECRET_KEY=$SECRET_KEY
 TURNSTILE_SITE_KEY=$TURNSTILE_SITE
@@ -127,13 +120,6 @@ EOF
 chmod 600 "$ENV_FILE"
 echo ".env escrito em $ENV_FILE (permissão 600)."
 
-if [[ -n "$DOMAIN" && -f "$CADDYFILE" ]]; then
-  cp "$CADDYFILE" "$CADDYFILE.bak.$(date +%s)"
-  # troca a primeira linha "algumacoisa {" (o bloco de site) pelo domínio informado
-  sed -i "0,/^[^#[:space:]].*{$/s//$DOMAIN {/" "$CADDYFILE"
-  echo "Caddyfile atualizado para o domínio: $DOMAIN"
-fi
-
 if [[ -z "$TURNSTILE_SITE" || -z "$TURNSTILE_SECRET" ]]; then
   echo
   echo "Aviso: Turnstile não configurado — o captcha ficará DESATIVADO."
@@ -142,5 +128,6 @@ if [[ -z "$TURNSTILE_SITE" || -z "$TURNSTILE_SECRET" ]]; then
 fi
 
 echo
-echo "Pronto. Para subir/atualizar os containers:"
+echo "Pronto. Para subir/atualizar o container:"
 echo "  docker compose up -d --build"
+echo "Depois, aponte o nginx pro container usando deploy/nginx-bookvote.conf."

@@ -85,10 +85,11 @@ sem isso, o `uvicorn --reload` às vezes não recarrega variáveis de ambiente
 entre reinícios do processo pai — se persistir, pare e rode `uvicorn`
 de novo (Ctrl+C e novo `uvicorn app.main:app --reload`).
 
-## Deploy na Oracle Cloud (VM já criada)
+## Deploy na Oracle Cloud (nginx já instalado na VM)
 
-Pressupondo uma instância Compute (Ubuntu) com portas 80/443 liberadas na
-Security List/NSG do VCN e no `iptables` da própria instância.
+Pressupondo uma instância Compute (Ubuntu) com nginx já rodando (servindo
+outros sites) e portas 80/443 liberadas na Security List/NSG do VCN e no
+firewall da própria instância.
 
 1. **Envie os arquivos para a VM** (do seu computador):
    ```bash
@@ -101,59 +102,66 @@ Security List/NSG do VCN e no `iptables` da própria instância.
    sudo usermod -aG docker $USER && newgrp docker
    ```
 
-3. **Libere as portas no firewall da própria instância** (Oracle Linux/Ubuntu
-   geralmente bloqueiam por padrão além da Security List do VCN):
-   ```bash
-   sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
-   sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-   sudo netfilter-persistent save   # se disponível; senão, ver doc da sua imagem
-   ```
-   E confirme no painel da Oracle Cloud que a Security List/NSG do VCN libera
-   entrada TCP 80 e 443 de `0.0.0.0/0`.
+3. **Confirme que as portas 80/443 já estão liberadas** (Security List/NSG
+   do VCN de `0.0.0.0/0`, e no firewall local se você usa algo além do
+   nginx). Como o nginx já está instalado, provavelmente isso já está feito.
 
-4. **Configure o domínio**: aponte um registro DNS tipo A para o IP público
-   da VM. O `Caddyfile` traz `seudominio.com.br` como placeholder — você pode
-   editá-lo manualmente ou deixar o script do passo 5 substituir pelo domínio
-   real (o Caddy emite certificado HTTPS automaticamente via Let's Encrypt —
-   por isso precisa de domínio real e portas 80/443 abertas).
-
-   Se preferir testar só por IP sem domínio/HTTPS por enquanto, troque o
-   `Caddyfile` por:
-   ```
-   :80 {
-       reverse_proxy web:8000
-   }
-   ```
-   e depois volte para o domínio quando for para produção (o cookie de
-   votante exige `BOOKVOTE_COOKIE_SECURE=true` só funciona bem em HTTPS).
-
-5. **Configure o `.env` com o script de setup** (gera a chave secreta
-   automaticamente e já pode atualizar o domínio no `Caddyfile`):
+4. **Configure o `.env` com o script de setup** (gera a chave secreta
+   automaticamente):
    ```bash
    cd ~/bookvote
    ./scripts/setup_env.sh
    ```
    Ele pergunta as chaves do Turnstile (crie gratuitamente em
    https://dash.cloudflare.com/ → Turnstile — pode deixar em branco para
-   testar sem captcha), o limite de votantes por IP e o domínio.
+   testar sem captcha), a chave do Google Books (opcional) e o limite de
+   votantes por IP.
 
-   Para deploy automatizado (sem prompts), passe tudo via flags, por exemplo:
+   Para deploy automatizado (sem prompts):
    ```bash
    ./scripts/setup_env.sh --yes \
      --turnstile-site SEU_SITE_KEY --turnstile-secret SEU_SECRET_KEY \
-     --max-voters 8 --domain enquete.seudominio.com.br
+     --max-voters 8 --google-books-key SUA_CHAVE
    ```
-   Rodar o script de novo depois não perde a chave secreta já gerada nem
-   as outras configs — ele faz backup do `.env`/`Caddyfile` anteriores e só
-   atualiza o que você passar.
+   Rodar de novo depois não perde a chave secreta já gerada — ele faz
+   backup do `.env` anterior e só atualiza o que você passar.
 
-6. **Suba os containers**:
+5. **Suba o container** (só a aplicação — sem proxy próprio; o container
+   fica acessível apenas em `127.0.0.1:8000`, nunca direto pela internet):
    ```bash
    docker compose up -d --build
    ```
 
-7. Acesse `https://seudominio.com.br`, crie sua primeira enquete e guarde o
-   link de admin que aparece após a criação.
+6. **Aponte o nginx para o container**: copie `deploy/nginx-bookvote.conf`
+   para `/etc/nginx/sites-available/bookvote`, troque `server_name` pelo
+   seu domínio/subdomínio, e ative:
+   ```bash
+   sudo cp deploy/nginx-bookvote.conf /etc/nginx/sites-available/bookvote
+   sudo nano /etc/nginx/sites-available/bookvote   # ajuste o server_name
+   sudo ln -s /etc/nginx/sites-available/bookvote /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+7. **HTTPS**: se você já usa certbot nessa VM para outros sites, é só rodar
+   (ele detecta o server block novo e adiciona TLS automaticamente):
+   ```bash
+   sudo certbot --nginx -d enquete.seudominio.com.br
+   ```
+
+8. Acesse `https://enquete.seudominio.com.br`, crie sua primeira enquete e
+   guarde o link de admin que aparece após a criação.
+
+> **Por que confiar em `X-Forwarded-For`**: o app usa esse cabeçalho para
+> identificar IPs (limite de votantes por rede, rate limiting). O
+> `docker-compose.yml` publica o container só em `127.0.0.1` — inacessível
+> de fora da própria VM — e o `Dockerfile` roda o uvicorn com
+> `--proxy-headers --forwarded-allow-ips='*'`, ou seja, ele confia no
+> `X-Forwarded-For` de qualquer coisa que se conecte à porta 8000. Isso só
+> é seguro porque, pela topologia de rede, a única coisa que consegue se
+> conectar ali é um processo no próprio host (o nginx) — ninguém de fora
+> alcança o container direto. O `deploy/nginx-bookvote.conf` já envia esse
+> cabeçalho corretamente; se você usar outro proxy no lugar do nginx,
+> confirme que ele também envia `X-Forwarded-For` e `X-Forwarded-Proto`.
 
 ### Backup
 

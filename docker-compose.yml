@@ -5,23 +5,10 @@ services:
     env_file: .env
     volumes:
       - bookvote_data:/data
-    expose:
-      - "8000"
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
+    # Bound to loopback only: reachable from nginx on the same host, not
+    # directly from the internet. nginx is the public-facing TLS terminator.
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
+      - "127.0.0.1:8000:8000"
 
 volumes:
   bookvote_data:
-  caddy_data:
-  caddy_config:
