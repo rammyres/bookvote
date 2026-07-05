@@ -1,3 +1,7 @@
 .env
 .venv/
-bookvote_runoff.patch
+.vscode/
+app/__pycache__/
+data/
+
+
