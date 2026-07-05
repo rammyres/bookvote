@@ -25,6 +25,8 @@ TURNSTILE_SECRET=""
 MAX_VOTERS=""
 COOKIE_SECURE=""
 GOOGLE_BOOKS_KEY=""
+RESEND_KEY=""
+RESEND_FROM=""
 
 usage() {
   grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,20p'
@@ -38,6 +40,8 @@ while [[ $# -gt 0 ]]; do
     --max-voters) MAX_VOTERS="$2"; shift 2 ;;
     --cookie-secure) COOKIE_SECURE="$2"; shift 2 ;;
     --google-books-key) GOOGLE_BOOKS_KEY="$2"; shift 2 ;;
+    --resend-key) RESEND_KEY="$2"; shift 2 ;;
+    --resend-from) RESEND_FROM="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Opção desconhecida: $1" >&2; usage; exit 1 ;;
   esac
@@ -71,6 +75,8 @@ EXISTING_TS_SECRET=""
 EXISTING_MAX_VOTERS="6"
 EXISTING_COOKIE_SECURE="true"
 EXISTING_GOOGLE_BOOKS_KEY=""
+EXISTING_RESEND_KEY=""
+EXISTING_RESEND_FROM="Enquete de Livros <onboarding@resend.dev>"
 
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -83,6 +89,8 @@ if [[ -f "$ENV_FILE" ]]; then
   EXISTING_MAX_VOTERS="${BOOKVOTE_MAX_VOTERS_PER_IP:-6}"
   EXISTING_COOKIE_SECURE="${BOOKVOTE_COOKIE_SECURE:-true}"
   EXISTING_GOOGLE_BOOKS_KEY="${GOOGLE_BOOKS_API_KEY:-}"
+  EXISTING_RESEND_KEY="${RESEND_API_KEY:-}"
+  EXISTING_RESEND_FROM="${RESEND_FROM_EMAIL:-Enquete de Livros <onboarding@resend.dev>}"
   cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%s)"
   echo "Backup do .env anterior salvo em $ENV_FILE.bak.<timestamp>"
 fi
@@ -105,6 +113,12 @@ fi
 if [[ -z "$GOOGLE_BOOKS_KEY" ]]; then
   GOOGLE_BOOKS_KEY="$(ask "Google Books API key (opcional, deixe em branco para cota pública)" "$EXISTING_GOOGLE_BOOKS_KEY")"
 fi
+if [[ -z "$RESEND_KEY" ]]; then
+  RESEND_KEY="$(ask "Resend API key (opcional, deixe em branco para não enviar e-mails)" "$EXISTING_RESEND_KEY")"
+fi
+if [[ -z "$RESEND_FROM" ]]; then
+  RESEND_FROM="$(ask "Remetente dos e-mails (Resend)" "$EXISTING_RESEND_FROM")"
+fi
 if [[ -z "$COOKIE_SECURE" ]]; then
   COOKIE_SECURE="$(ask "Exigir HTTPS para o cookie de votante (true/false)" "$EXISTING_COOKIE_SECURE")"
 fi
@@ -115,6 +129,8 @@ TURNSTILE_SECRET_KEY=$TURNSTILE_SECRET
 BOOKVOTE_COOKIE_SECURE=$COOKIE_SECURE
 BOOKVOTE_MAX_VOTERS_PER_IP=$MAX_VOTERS
 GOOGLE_BOOKS_API_KEY=$GOOGLE_BOOKS_KEY
+RESEND_API_KEY=$RESEND_KEY
+RESEND_FROM_EMAIL=$RESEND_FROM
 EOF
 
 chmod 600 "$ENV_FILE"
@@ -125,6 +141,13 @@ if [[ -z "$TURNSTILE_SITE" || -z "$TURNSTILE_SECRET" ]]; then
   echo "Aviso: Turnstile não configurado — o captcha ficará DESATIVADO."
   echo "Recomendado para produção: crie chaves em https://dash.cloudflare.com/ > Turnstile"
   echo "e rode este script de novo (ou edite o .env manualmente)."
+fi
+
+if [[ -z "$RESEND_KEY" ]]; then
+  echo
+  echo "Aviso: Resend não configurado — e-mails de administração (criação e"
+  echo "recuperação de link) não serão enviados. Crie uma API key em"
+  echo "https://resend.com/api-keys e rode este script de novo."
 fi
 
 echo

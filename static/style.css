@@ -350,6 +350,24 @@ button:hover { opacity: 0.9; }
   font-size: 0.9rem;
 }
 
+.landing-card { text-align: center; padding: 2.25rem 1.75rem; }
+
+.landing-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.landing-actions .btn { margin-top: 0; width: 100%; text-align: center; }
+
+.recovery-card {
+  margin-top: 1.5rem;
+  padding: 1.1rem 1.5rem;
+}
+
+.recovery-card form { margin-top: 0.75rem; }
+
 /* --- dramatic draw: spinning reel of tied titles, then an ink-stamp thud --- */
 .draw-reel {
   margin: 1.25rem 0;

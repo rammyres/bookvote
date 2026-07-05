@@ -1,34 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Criar enquete de livros{% endblock %}
+{% block title %}Enquete de Livros{% endblock %}
 {% block content %}
-<div class="card">
-  <h1>Criar uma enquete de livros</h1>
-  <p class="poll-desc">1ª fase: qualquer pessoa indica livros. 2ª fase: todo mundo vota em quantos livros quiser. 3ª fase: só os 3 mais votados (empates incluídos) disputam um voto único por pessoa, valendo o campeão.</p>
+<div class="card landing-card">
+  <h1>Enquete de Livros</h1>
+  <p class="poll-desc">Indicação de livros → votação múltipla → votação final entre os 3 finalistas → campeão.</p>
 
-  <form method="post" action="/polls">
-    <label for="title">Título da enquete</label>
-    <input type="text" id="title" name="title" required placeholder="Ex: Leitura do clube — julho">
-
-    <label for="description">Descrição (opcional)</label>
-    <textarea id="description" name="description" rows="3" placeholder="Regras, tema do mês, etc."></textarea>
-
-    <label for="nomination_end_local">Indicações encerram em</label>
-    <input type="datetime-local" id="nomination_end_local" name="nomination_end_local" required>
-    <p class="hint">Até esse momento, qualquer pessoa com o link pode sugerir livros.</p>
-
-    <label for="round1_end_local">1ª votação encerra em</label>
-    <input type="datetime-local" id="round1_end_local" name="round1_end_local" required>
-    <p class="hint">Todos os livros indicados entram nessa votação; cada pessoa marca quantos quiser.</p>
-
-    <label for="round2_end_local">2ª votação encerra em</label>
-    <input type="datetime-local" id="round2_end_local" name="round2_end_local" required>
-    <p class="hint">Só os 3 mais votados da 1ª fase (empates incluídos) entram aqui; cada pessoa vota em 1 só.</p>
-
-    <label for="max_noms_per_voter">Máximo de indicações por pessoa</label>
-    <input type="number" id="max_noms_per_voter" name="max_noms_per_voter" value="3" min="1" max="20">
-
-    <input type="hidden" name="tz_offset" value="0">
-    <button type="submit">Criar enquete</button>
-  </form>
+  <div class="landing-actions">
+    <a class="btn" href="/new">Criar nova enquete</a>
+    <a class="btn secondary" href="/polls">Ver votações em andamento</a>
+  </div>
 </div>
 {% endblock %}

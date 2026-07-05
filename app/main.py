@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -19,13 +20,15 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from .database import Base, engine, get_db
+from .database import Base, engine, get_db, ensure_column
 from .models import Book, Poll, Vote, VoterIdentity, gen_short_id
 from . import poll_logic as pl
 from .book_search import search_books
+from .email_sender import send_email
 from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SITE_KEY, CAPTCHA_ENABLED
 
 Base.metadata.create_all(bind=engine)
+ensure_column("polls", "admin_email", "VARCHAR")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -38,6 +41,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 MAX_VOTER_IDENTITIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_VOTERS_PER_IP", "6"))
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def is_valid_email(value: str) -> bool:
+    return bool(_EMAIL_RE.match(value.strip()))
 
 
 def parse_local_datetime(value: str, tz_offset_minutes: int) -> datetime:
@@ -97,9 +106,24 @@ def home(request: Request):
     return templates.TemplateResponse("home.html", {"request": request})
 
 
+@app.get("/new", response_class=HTMLResponse)
+def new_poll_form(request: Request):
+    return templates.TemplateResponse("new_poll.html", {"request": request})
+
+
+@app.get("/polls", response_class=HTMLResponse)
+def list_polls(request: Request, db: Session = Depends(get_db)):
+    all_polls = db.query(Poll).order_by(Poll.created_at.desc()).all()
+    ongoing = [(p, pl.get_phase(p)) for p in all_polls]
+    ongoing = [(p, phase) for p, phase in ongoing if phase != pl.PHASE_CLOSED]
+    return templates.TemplateResponse(
+        "poll_list.html", {"request": request, "ongoing": ongoing}
+    )
+
+
 @app.post("/polls")
 @limiter.limit("5/minute")
-def create_poll(
+async def create_poll(
     request: Request,
     title: str = Form(...),
     description: str = Form(""),
@@ -108,6 +132,7 @@ def create_poll(
     round2_end_local: str = Form(...),
     tz_offset: int = Form(0),
     max_noms_per_voter: int = Form(3),
+    admin_email: str = Form(""),
     db: Session = Depends(get_db),
 ):
     nomination_end = parse_local_datetime(nomination_end_local, tz_offset)
@@ -121,6 +146,10 @@ def create_poll(
     if round2_end <= round1_end:
         raise HTTPException(400, "O fim da 2ª votação precisa ser depois do fim da 1ª votação.")
 
+    admin_email_clean = admin_email.strip()
+    if admin_email_clean and not is_valid_email(admin_email_clean):
+        raise HTTPException(400, "E-mail inválido.")
+
     poll = None
     for _ in range(5):
         candidate = Poll(
@@ -132,6 +161,7 @@ def create_poll(
             round1_end=round1_end,
             round2_end=round2_end,
             max_noms_per_voter=max_noms_per_voter,
+            admin_email=admin_email_clean or None,
         )
         db.add(candidate)
         try:
@@ -143,6 +173,23 @@ def create_poll(
     if poll is None:
         raise HTTPException(500, "Não foi possível gerar um link único. Tente novamente.")
     db.refresh(poll)
+
+    if poll.admin_email:
+        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+        public_url = f"{request.url.scheme}://{request.url.netloc}/p/{poll.id}"
+        await send_email(
+            to=poll.admin_email,
+            subject=f"Link de administração — {poll.title}",
+            html=(
+                f"<p>Sua enquete <strong>{poll.title}</strong> foi criada.</p>"
+                f"<p><strong>Link de administração</strong> (guarde com cuidado, "
+                f"quem o tiver administra a enquete):<br>"
+                f'<a href="{admin_url}">{admin_url}</a></p>'
+                f"<p><strong>Link público</strong> (compartilhe com os participantes):<br>"
+                f'<a href="{public_url}">{public_url}</a></p>'
+            ),
+        )
+
     return RedirectResponse(url=f"/admin/{poll.admin_token}", status_code=303)
 
 
@@ -160,6 +207,7 @@ def view_poll(request: Request, poll_id: str, response: Response, db: Session = 
         "phase": phase,
         "captcha_enabled": CAPTCHA_ENABLED,
         "turnstile_site_key": TURNSTILE_SITE_KEY,
+        "show_recovery": True,
     }
 
     if phase == pl.PHASE_NOMINATION:
@@ -272,6 +320,30 @@ async def nominate(
         raise HTTPException(400, "Esse livro já foi indicado.")
 
     return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
+
+
+@app.post("/p/{poll_id}/resend-admin-link")
+@limiter.limit("3/hour")
+async def resend_admin_link(request: Request, poll_id: str, email: str = Form(...), db: Session = Depends(get_db)):
+    poll = get_poll_or_404(db, poll_id)
+    email_norm = email.strip().lower()
+
+    if poll.admin_email and poll.admin_email.strip().lower() == email_norm:
+        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+        await send_email(
+            to=poll.admin_email,
+            subject=f"Link de administração — {poll.title}",
+            html=(
+                f"<p>Você pediu para recuperar o link de administração da enquete "
+                f"<strong>{poll.title}</strong>:</p>"
+                f'<p><a href="{admin_url}">{admin_url}</a></p>'
+                f"<p>Guarde esse link com cuidado — quem o tiver administra a enquete.</p>"
+            ),
+        )
+
+    # Same response whether or not the email matched, so this endpoint can't
+    # be used to probe which address (if any) is registered on a poll.
+    return RedirectResponse(url=f"/p/{poll_id}?resend=1", status_code=303)
 
 
 @app.post("/p/{poll_id}/vote-round1")

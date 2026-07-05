@@ -10,6 +10,10 @@
   <label>Link público (compartilhe com os participantes)</label>
   <div class="admin-link-box" id="public-link">{{ request.url.scheme }}://{{ request.url.netloc }}/p/{{ poll.id }}</div>
 
+  <p class="hint">
+    {% if poll.admin_email %}E-mail de recuperação: {{ poll.admin_email }}{% else %}Nenhum e-mail de recuperação configurado para esta enquete.{% endif %}
+  </p>
+
   <div class="meta-row">
     <span>Fase atual: <strong>{{ {"nomination": "Indicações", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada"}[phase] }}</strong></span>
   </div>

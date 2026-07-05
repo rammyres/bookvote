@@ -31,6 +31,14 @@ sem contas de usuário.
   funciona (só sem a animação).
 - **Administração**: quem cria a enquete recebe um link secreto de admin
   (`/admin/<token>`) para encerrar fases antes do prazo e acionar o sorteio.
+  Se informar um e-mail ao criar a enquete, esse link também chega por
+  e-mail (via Resend) — e pode ser reenviado a qualquer momento pela página
+  pública da enquete ("Perdeu o link de administração? Clique aqui"),
+  informando o mesmo e-mail.
+- **Página inicial**: mostra dois botões — "Criar nova enquete" e "Ver
+  votações em andamento" (lista todas as enquetes que ainda não encerraram,
+  visível para qualquer visitante, sem login — pense nisso se algum dia
+  hospedar grupos sem relação entre si na mesma instância).
 - **Links curtos**: o link público usa 8 caracteres (`/p/AbC123xy`) e o link
   de admin usa 16 (`/admin/<token>`, ~95 bits de entropia — continua sendo
   um segredo forte, só que mais fácil de copiar e colar do que um UUID).
@@ -59,6 +67,14 @@ sem contas de usuário.
 Nenhuma camada isolada é perfeita, mas juntas encarecem bastante o abuso
 para uma ferramenta deste porte. Se precisar de algo mais forte no futuro,
 o próximo passo natural é login por e-mail (link único) ou Telegram.
+
+**Sobre e-mail (Resend)**: sem `RESEND_API_KEY`, tudo funciona normalmente
+— só não envia e-mail de link de administração. No plano gratuito do
+Resend, sem domínio verificado, o remetente de testes (`onboarding@resend.dev`)
+só entrega para o e-mail cadastrado na sua própria conta Resend — para
+enviar a qualquer participante, verifique um domínio em
+https://resend.com/domains e troque `RESEND_FROM_EMAIL` no `.env` (ou via
+`./scripts/setup_env.sh --resend-from "Nome <voce@seudominio.com>"`).
 
 ## Rodar localmente
 

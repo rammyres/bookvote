@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Votações em andamento{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="hint"><a href="/">← Voltar</a></p>
+  <h1>Votações em andamento</h1>
+
+  {% if ongoing %}
+  <ul class="book-list">
+    {% for poll, phase in ongoing %}
+    <li class="book-row">
+      <div class="book-row-text">
+        <a href="/p/{{ poll.id }}" class="title" style="text-decoration:underline;">{{ poll.title }}</a>
+        <span class="isbn" style="float:right;">
+          {{ {"nomination": "Indicações", "round1": "Votação 1", "round2": "Votação 2"}[phase] }}
+        </span>
+        {% if poll.description %}<br><span class="author">{{ poll.description }}</span>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">Nenhuma votação em andamento agora.</p>
+  {% endif %}
+
+  <a class="btn secondary" href="/new" style="margin-top:1.5rem;">Criar nova enquete</a>
+</div>
+{% endblock %}

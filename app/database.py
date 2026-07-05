@@ -22,3 +22,18 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_column(table: str, column: str, ddl_type: str) -> None:
+    """Adds a column to an existing SQLite table if it's missing.
+
+    This project has no migration framework (overkill for its size), so
+    additive, nullable columns are patched in at startup instead of
+    forcing a DB wipe on every schema change. Only handles simple ADD
+    COLUMN cases — anything more involved (renames, NOT NULL backfills)
+    still needs a manual/managed migration.
+    """
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()}
+        if column not in cols:
+            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")

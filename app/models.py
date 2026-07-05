@@ -48,6 +48,8 @@ class Poll(Base):
     admin_token = Column(
         String, unique=True, default=lambda: gen_short_id(16), nullable=False, index=True
     )
+    # optional: lets the creator recover their admin link later by email
+    admin_email = Column(String, nullable=True)
 
     nomination_end = Column(DateTime, nullable=False)
     round1_end = Column(DateTime, nullable=False)  # multi-vote, all nominated books
