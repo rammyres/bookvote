@@ -6,7 +6,22 @@ import httpx
 logger = logging.getLogger("bookvote.book_search")
 
 GOOGLE_BOOKS_API = "https://www.googleapis.com/books/v1/volumes"
-GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY", "")  # optional, raises quota
+
+
+def _clean_env(raw: str) -> str:
+    """Docker Compose's env_file does NOT strip quotes like a shell would —
+    `KEY="abc"` is loaded literally as the 4-char string `"abc"`. Strip
+    accidental quotes/whitespace so a copy-pasted key still works."""
+    return raw.strip().strip('"').strip("'").strip()
+
+
+GOOGLE_BOOKS_API_KEY = _clean_env(os.environ.get("GOOGLE_BOOKS_API_KEY", ""))
+
+if GOOGLE_BOOKS_API_KEY:
+    _masked = GOOGLE_BOOKS_API_KEY[:4] + "…" + GOOGLE_BOOKS_API_KEY[-4:]
+    logger.info("Google Books API key carregada (%s), buscas usarão cota autenticada.", _masked)
+else:
+    logger.warning("Google Books API key NÃO configurada — buscas usarão a cota pública anônima.")
 
 
 async def search_books(query: str, max_results: int = 6) -> list[dict]:

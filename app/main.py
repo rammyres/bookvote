@@ -1,6 +1,13 @@
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
+
+from dotenv import load_dotenv
+
+load_dotenv()  # no-op if vars are already set (e.g. by docker-compose's env_file)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from fastapi import FastAPI, Request, Response, Form, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse

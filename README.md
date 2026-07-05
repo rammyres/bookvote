@@ -70,7 +70,20 @@ uvicorn app.main:app --reload
 ```
 
 Abra http://localhost:8000 — sem as chaves do Turnstile no `.env`, o captcha
-fica desativado automaticamente (bom para testar o fluxo).
+fica desativado automaticamente (bom para testar o fluxo). O `.env` é lido
+automaticamente tanto local (via `python-dotenv`) quanto no Docker (via
+`env_file`), então não precisa exportar nada manualmente — só editar o
+arquivo e reiniciar o `uvicorn`/container.
+
+**Sobre a busca de livros**: sem `GOOGLE_BOOKS_API_KEY`, as buscas usam a
+cota pública anônima do Google Books, que é bem pequena e some rápido com
+uso normal (aparecem como erro `429 Too Many Requests` no log). Isso não
+quebra a ferramenta — a indicação manual continua funcionando — mas para
+uso real vale configurar a chave (veja `.env.example`). Depois de editar o
+`.env`, confirme no log de inicialização se apareceu "API key carregada":
+sem isso, o `uvicorn --reload` às vezes não recarrega variáveis de ambiente
+entre reinícios do processo pai — se persistir, pare e rode `uvicorn`
+de novo (Ctrl+C e novo `uvicorn app.main:app --reload`).
 
 ## Deploy na Oracle Cloud (VM já criada)
 
