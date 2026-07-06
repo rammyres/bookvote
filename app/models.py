@@ -50,6 +50,9 @@ class Poll(Base):
     )
     # optional: lets the creator recover their admin link later by email
     admin_email = Column(String, nullable=True)
+    # set once the closure e-mail has been sent (only sent once results
+    # are resolved — i.e. not while a 1st-place tie is still pending a draw)
+    close_email_sent = Column(Boolean, default=False, nullable=False)
 
     nomination_end = Column(DateTime, nullable=False)
     round1_end = Column(DateTime, nullable=False)  # multi-vote, all nominated books

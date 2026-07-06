@@ -18,22 +18,80 @@
     <span>Fase atual: <strong>{{ {"nomination": "Indicações", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada"}[phase] }}</strong></span>
   </div>
 
+  {% if admin_error %}<div class="warning-box">{{ admin_error }}</div>{% endif %}
+
+  {% set current_index = {"nomination": 0, "round1": 1, "round2": 2, "closed": 3}[phase] %}
+
   {% if phase == "nomination" %}
-  <p class="hint">Indicações encerram automaticamente em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span>).</p>
   <form method="post" action="/admin/{{ poll.admin_token }}/end-nomination" onsubmit="return confirm('Encerrar indicações agora e passar para a 1ª votação?');">
     <button type="submit" class="secondary">Encerrar indicações agora</button>
   </form>
   {% elif phase == "round1" %}
-  <p class="hint">1ª votação encerra automaticamente em <strong data-utc="{{ poll.round1_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.round1_end.isoformat() }}Z"></span>).</p>
   <form method="post" action="/admin/{{ poll.admin_token }}/end-round1" onsubmit="return confirm('Encerrar a 1ª votação agora e apurar os finalistas?');">
     <button type="submit" class="secondary">Encerrar 1ª votação agora</button>
   </form>
   {% elif phase == "round2" %}
-  <p class="hint">Votação final encerra automaticamente em <strong data-utc="{{ poll.round2_end.isoformat() }}Z"></strong> (faltam <span data-countdown="{{ poll.round2_end.isoformat() }}Z"></span>).</p>
   <form method="post" action="/admin/{{ poll.admin_token }}/end-round2" onsubmit="return confirm('Encerrar a votação final agora?');">
     <button type="submit" class="secondary">Encerrar votação final agora</button>
   </form>
   {% endif %}
+
+  <h2 style="margin-top:1.5rem;">Prazos</h2>
+
+  <div class="deadline-row">
+    <div class="deadline-info">
+      <strong>Indicações</strong> — encerram em <span data-utc="{{ poll.nomination_end.isoformat() }}Z"></span>
+    </div>
+    {% if current_index == 0 %}
+    <form method="post" action="/admin/{{ poll.admin_token }}/extend" class="extend-form">
+      <input type="hidden" name="phase_field" value="nomination">
+      <input type="hidden" name="tz_offset" value="0">
+      <input type="datetime-local" name="new_end_local" required data-current-utc="{{ poll.nomination_end.isoformat() }}Z">
+      <button type="submit" class="secondary">Estender</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="deadline-row">
+    <div class="deadline-info">
+      <strong>Votação 1</strong> — encerra em <span data-utc="{{ poll.round1_end.isoformat() }}Z"></span>
+    </div>
+    {% if current_index <= 1 %}
+    <form method="post" action="/admin/{{ poll.admin_token }}/extend" class="extend-form">
+      <input type="hidden" name="phase_field" value="round1">
+      <input type="hidden" name="tz_offset" value="0">
+      <input type="datetime-local" name="new_end_local" required data-current-utc="{{ poll.round1_end.isoformat() }}Z">
+      <button type="submit" class="secondary">Estender</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="deadline-row">
+    <div class="deadline-info">
+      <strong>Votação 2</strong> — encerra em <span data-utc="{{ poll.round2_end.isoformat() }}Z"></span>
+    </div>
+    {% if current_index <= 2 %}
+    <form method="post" action="/admin/{{ poll.admin_token }}/extend" class="extend-form">
+      <input type="hidden" name="phase_field" value="round2">
+      <input type="hidden" name="tz_offset" value="0">
+      <input type="datetime-local" name="new_end_local" required data-current-utc="{{ poll.round2_end.isoformat() }}Z">
+      <button type="submit" class="secondary">Estender</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="hint">Estender só aceita datas depois do prazo atual. Para antecipar, use o botão "Encerrar ... agora" acima.</p>
+
+  <script>
+    // Pre-fills each datetime-local "extend" field with its current
+    // deadline converted to the visitor's local time.
+    document.querySelectorAll('input[data-current-utc]').forEach(function (el) {
+      var d = new Date(el.getAttribute('data-current-utc'));
+      if (isNaN(d.getTime())) return;
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+      el.value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+        'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    });
+  </script>
 </div>
 
 <div class="card">

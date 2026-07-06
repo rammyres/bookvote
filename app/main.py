@@ -29,6 +29,7 @@ from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SI
 
 Base.metadata.create_all(bind=engine)
 ensure_column("polls", "admin_email", "VARCHAR")
+ensure_column("polls", "close_email_sent", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
 
@@ -119,6 +120,47 @@ def redirect_with_error(poll_id: str, code: str) -> RedirectResponse:
     browser — this keeps the person on a normal HTML page with an inline
     message instead."""
     return RedirectResponse(url=f"/p/{poll_id}?error={code}", status_code=303)
+
+
+ADMIN_ERROR_MESSAGES = {
+    "bad_dates": "Datas inválidas.",
+    "not_extension": "O novo prazo precisa ser depois do prazo atual — isso é uma extensão, não uma antecipação.",
+    "phase_over": "Essa fase já foi concluída, não é mais possível estender o prazo dela.",
+    "order": "O novo prazo entraria em conflito com o prazo de outra fase — estenda essa outra fase primeiro, se for o caso.",
+    "bad_phase": "Fase inválida.",
+}
+
+
+def redirect_admin_with_error(admin_token: str, code: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/admin/{admin_token}?error={code}", status_code=303)
+
+
+async def maybe_notify_closure(db: Session, poll: Poll, request: Request) -> None:
+    """Sends the poll creator a one-time "the vote is over" email, once the
+    result is actually resolved (skipped while a 1st-place tie is still
+    waiting on a draw, so the e-mail always reflects a real outcome)."""
+    if poll.close_email_sent or not poll.admin_email:
+        return
+
+    results = pl.compute_final_results(db, poll)
+    if not results.resolved:
+        return  # tie pending a draw — try again next time someone loads a page
+
+    champion_title = results.champion.book.title if results.champion else "(sem votos registrados)"
+    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    public_url = f"{request.url.scheme}://{request.url.netloc}/p/{poll.id}"
+    await send_email(
+        to=poll.admin_email,
+        subject=f"Enquete encerrada — {poll.title}",
+        html=(
+            f"<p>A votação da enquete <strong>{poll.title}</strong> foi encerrada.</p>"
+            f"<p><strong>Livro escolhido:</strong> {champion_title}</p>"
+            f'<p>Veja o resultado completo: <a href="{public_url}">{public_url}</a></p>'
+            f'<p>Painel de administração: <a href="{admin_url}">{admin_url}</a></p>'
+        ),
+    )
+    poll.close_email_sent = True
+    db.commit()
 
 
 # ---------------------------------------------------------------- home / create
@@ -225,11 +267,14 @@ PHASE_ORDER = [pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2, pl.PHASE_C
 
 
 @app.get("/p/{poll_id}", response_class=HTMLResponse)
-def view_poll(request: Request, poll_id: str, response: Response, db: Session = Depends(get_db)):
+async def view_poll(request: Request, poll_id: str, response: Response, db: Session = Depends(get_db)):
     poll = get_poll_or_404(db, poll_id)
     voter_id = get_or_set_voter_id(request, response)
     phase = pl.get_phase(poll)
     current_index = PHASE_ORDER.index(phase)
+
+    if phase == pl.PHASE_CLOSED:
+        await maybe_notify_closure(db, poll, request)
 
     # ?view=<phase> lets people revisit an already-concluded phase read-only
     # (e.g. see the nomination list or round-1 tally after voting has moved
@@ -489,7 +534,7 @@ async def vote_round2(
 # --------------------------------------------------------------------------- admin
 
 @app.get("/admin/{admin_token}", response_class=HTMLResponse)
-def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(get_db)):
+async def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
     phase = pl.get_phase(poll)
 
@@ -502,6 +547,7 @@ def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(ge
         round2_tally = pl.tally(db, poll.id, round=2, promoted_only=True)
     if phase == pl.PHASE_CLOSED:
         results = pl.compute_final_results(db, poll)
+        await maybe_notify_closure(db, poll, request)
 
     tie_group_json = None
     if results and results.tie_group:
@@ -522,6 +568,7 @@ def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(ge
             "round2_tally": round2_tally,
             "results": results,
             "tie_group_json": tie_group_json,
+            "admin_error": ADMIN_ERROR_MESSAGES.get(request.query_params.get("error")),
         },
     )
 
@@ -552,6 +599,54 @@ def unreject_book(admin_token: str, book_id: str, db: Session = Depends(get_db))
         raise HTTPException(404, "Livro não encontrado.")
     book.rejected = False
     book.rejection_reason = None
+    db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/extend")
+def extend_deadline(
+    admin_token: str,
+    phase_field: str = Form(...),
+    new_end_local: str = Form(...),
+    tz_offset: int = Form(0),
+    db: Session = Depends(get_db),
+):
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    current_phase = pl.get_phase(poll)
+
+    try:
+        new_end = parse_local_datetime(new_end_local, tz_offset)
+    except ValueError:
+        return redirect_admin_with_error(admin_token, "bad_dates")
+
+    if phase_field == "nomination":
+        if current_phase != pl.PHASE_NOMINATION:
+            return redirect_admin_with_error(admin_token, "phase_over")
+        if new_end <= pl.as_aware(poll.nomination_end):
+            return redirect_admin_with_error(admin_token, "not_extension")
+        if new_end >= pl.as_aware(poll.round1_end):
+            return redirect_admin_with_error(admin_token, "order")
+        poll.nomination_end = new_end
+
+    elif phase_field == "round1":
+        if current_phase not in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1):
+            return redirect_admin_with_error(admin_token, "phase_over")
+        if new_end <= pl.as_aware(poll.round1_end):
+            return redirect_admin_with_error(admin_token, "not_extension")
+        if new_end >= pl.as_aware(poll.round2_end):
+            return redirect_admin_with_error(admin_token, "order")
+        poll.round1_end = new_end
+
+    elif phase_field == "round2":
+        if current_phase not in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2):
+            return redirect_admin_with_error(admin_token, "phase_over")
+        if new_end <= pl.as_aware(poll.round2_end):
+            return redirect_admin_with_error(admin_token, "not_extension")
+        poll.round2_end = new_end
+
+    else:
+        return redirect_admin_with_error(admin_token, "bad_phase")
+
     db.commit()
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
