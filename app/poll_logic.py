@@ -45,11 +45,12 @@ class Tally:
 
 def tally(db: Session, poll_id: str, round: int, promoted_only: bool = False) -> list[Tally]:
     """Vote counts for a single round (1 or 2), so a book's round-1 tally
-    never bleeds into its round-2 tally, even though it's the same row."""
+    never bleeds into its round-2 tally, even though it's the same row.
+    Rejected books never appear here — excluded from voting entirely."""
     q = (
         db.query(Book, func.count(Vote.id).label("n"))
         .outerjoin(Vote, and_(Vote.book_id == Book.id, Vote.round == round))
-        .filter(Book.poll_id == poll_id)
+        .filter(Book.poll_id == poll_id, Book.rejected.is_(False))
     )
     if promoted_only:
         q = q.filter(Book.promoted.is_(True))

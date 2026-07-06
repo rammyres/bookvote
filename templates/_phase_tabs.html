@@ -1,0 +1,15 @@
+{% set phase_order = ["nomination", "round1", "round2", "closed"] %}
+{% set tab_defs = [("nomination", "Indicações"), ("round1", "Votação 1"), ("round2", "Votação 2"), ("closed", "Resultado")] %}
+{% set current_index = phase_order.index(phase) %}
+<div class="phase-tabs">
+  {% for key, label in tab_defs %}
+  {% set idx = phase_order.index(key) %}
+  {% if idx > current_index %}
+  <span class="phase-tab disabled">{{ label }}</span>
+  {% elif key == view_phase %}
+  <span class="phase-tab active">{{ label }}</span>
+  {% else %}
+  <a class="phase-tab" href="/p/{{ poll.id }}?view={{ key }}">{{ label }}</a>
+  {% endif %}
+  {% endfor %}
+</div>

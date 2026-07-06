@@ -2,12 +2,7 @@
 {% block title %}{{ poll.title }} — resultado{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="phase-tabs">
-    <span class="phase-tab">Indicações</span>
-    <span class="phase-tab">Votação 1</span>
-    <span class="phase-tab">Votação 2</span>
-    <span class="phase-tab active">Resultado</span>
-  </div>
+  {% include "_phase_tabs.html" %}
 
   <h1>{{ poll.title }}</h1>
   <p class="hint">Votação encerrada.</p>

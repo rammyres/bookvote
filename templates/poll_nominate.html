@@ -2,22 +2,19 @@
 {% block title %}{{ poll.title }} — indicações{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="phase-tabs">
-    <span class="phase-tab active">Indicações</span>
-    <span class="phase-tab">Votação 1</span>
-    <span class="phase-tab">Votação 2</span>
-    <span class="phase-tab">Resultado</span>
-  </div>
+  {% include "_phase_tabs.html" %}
 
   <h1>{{ poll.title }}</h1>
   {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
 
+  {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
+
   <div class="meta-row">
-    <span>Indicações encerram em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong></span>
-    <span>faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span></span>
+    <span>Indicações {{ 'encerraram' if read_only else 'encerram' }} em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong></span>
+    {% if not read_only %}<span>faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span></span>{% endif %}
   </div>
 
-  <h2>Livros indicados até agora ({{ books|length }})</h2>
+  <h2>Livros indicados{% if not read_only %} até agora{% endif %} ({{ books|length }})</h2>
   {% if books %}
   <ul class="book-list">
     {% for b in books %}
@@ -39,6 +36,7 @@
   {% endif %}
 </div>
 
+{% if not read_only %}
 <div class="card">
   <h2>Indicar um livro</h2>
   <p class="hint">Você já indicou {{ my_nom_count }} de {{ poll.max_noms_per_voter }} livros permitidos.</p>
@@ -254,4 +252,5 @@
   <p class="hint">Você atingiu o limite de indicações para esta enquete.</p>
   {% endif %}
 </div>
+{% endif %}
 {% endblock %}

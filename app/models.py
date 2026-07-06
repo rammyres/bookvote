@@ -84,6 +84,12 @@ class Book(Base):
     # True for books that advanced to round 2 (top 3 of round 1, ties included)
     promoted = Column(Boolean, default=False, nullable=False)
 
+    # admin can reject a nomination during the nomination phase (e-book
+    # only, not released in Brazil, only found used, etc.) — rejected
+    # books are excluded from voting/tallies but kept for the record.
+    rejected = Column(Boolean, default=False, nullable=False)
+    rejection_reason = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=utcnow)
 
     poll = relationship("Poll", back_populates="books")

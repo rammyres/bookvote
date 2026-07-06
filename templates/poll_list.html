@@ -1,18 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Votações em andamento{% endblock %}
+{% block title %}{{ "Votações encerradas" if status == "closed" else "Votações em andamento" }}{% endblock %}
 {% block content %}
 <div class="card">
   <p class="hint"><a href="/">← Voltar</a></p>
-  <h1>Votações em andamento</h1>
+  <h1>{{ "Votações encerradas" if status == "closed" else "Votações em andamento" }}</h1>
 
-  {% if ongoing %}
+  <p class="hint">
+    {% if status == "closed" %}
+    <a href="/polls">Ver votações em andamento</a>
+    {% else %}
+    <a href="/polls?status=closed">Ver votações encerradas</a>
+    {% endif %}
+  </p>
+
+  {% if polls %}
   <ul class="book-list">
-    {% for poll, phase in ongoing %}
+    {% for poll, phase in polls %}
     <li class="book-row">
       <div class="book-row-text">
         <a href="/p/{{ poll.id }}" class="title" style="text-decoration:underline;">{{ poll.title }}</a>
         <span class="isbn" style="float:right;">
-          {{ {"nomination": "Indicações", "round1": "Votação 1", "round2": "Votação 2"}[phase] }}
+          {{ {"nomination": "Indicações", "round1": "Votação 1", "round2": "Votação 2", "closed": "Encerrada"}[phase] }}
         </span>
         {% if poll.description %}<br><span class="author">{{ poll.description }}</span>{% endif %}
       </div>
@@ -20,7 +28,7 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p class="hint">Nenhuma votação em andamento agora.</p>
+  <p class="hint">{{ "Nenhuma votação encerrada ainda." if status == "closed" else "Nenhuma votação em andamento agora." }}</p>
   {% endif %}
 
   <a class="btn secondary" href="/new" style="margin-top:1.5rem;">Criar nova enquete</a>

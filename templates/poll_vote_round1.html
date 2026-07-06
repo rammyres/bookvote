@@ -2,33 +2,61 @@
 {% block title %}{{ poll.title }} — 1ª votação{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="phase-tabs">
-    <span class="phase-tab">Indicações</span>
-    <span class="phase-tab active">Votação 1</span>
-    <span class="phase-tab">Votação 2</span>
-    <span class="phase-tab">Resultado</span>
-  </div>
+  {% include "_phase_tabs.html" %}
 
   <h1>{{ poll.title }}</h1>
   {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
 
+  {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
+
   <div class="meta-row">
-    <span>1ª votação encerra em <strong data-utc="{{ poll.round1_end.isoformat() }}Z"></strong></span>
-    <span>faltam <span data-countdown="{{ poll.round1_end.isoformat() }}Z"></span></span>
+    <span>1ª votação {{ 'encerrou' if read_only else 'encerra' }} em <strong data-utc="{{ poll.round1_end.isoformat() }}Z"></strong></span>
+    {% if not read_only %}<span>faltam <span data-countdown="{{ poll.round1_end.isoformat() }}Z"></span></span>{% endif %}
   </div>
 
-  <p class="hint">A lista de livros está travada. Marque quantos quiser — os 3 mais votados (empates incluídos) seguem para a votação final, onde cada pessoa escolhe só 1. Você pode voltar aqui e mudar seus votos até o encerramento.</p>
+  {% if read_only %}
+  <p class="hint">Resultado da 1ª votação — ⭐ marca quem seguiu para a votação final.</p>
+  {% else %}
+    {% if request.query_params.get('voted') == '1' %}
+    <div class="vote-status">✅ Voto registrado! Você marcou {{ my_votes|length }} livro{{ 's' if my_votes|length != 1 else '' }}.</div>
+    {% elif my_votes %}
+    <div class="vote-status">Você já votou em {{ my_votes|length }} livro{{ 's' if my_votes|length != 1 else '' }} nesta fase.</div>
+    {% else %}
+    <div class="vote-status pending">Você ainda não votou nesta fase.</div>
+    {% endif %}
+    <p class="hint">A lista de livros está travada. Marque quantos quiser — os 3 mais votados (empates incluídos) seguem para a votação final, onde cada pessoa escolhe só 1. Você pode voltar aqui e mudar seus votos até o encerramento.</p>
+  {% endif %}
 
-  <form method="post" action="/p/{{ poll.id }}/vote-round1">
-    {% for b in books %}
-    <label class="book-check" style="text-transform:none; font-weight:400; margin:0;">
-      <input type="checkbox" name="book_ids" value="{{ b.id }}" {% if b.id in my_votes %}checked{% endif %}>
-      {% if b.thumbnail_url %}
-      <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
+  {% if read_only %}
+  <ul class="book-list">
+    {% for t in tallies %}
+    <li class="book-row">
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
-      <span class="title">{{ b.title }}</span>
+      <div class="book-row-text">
+        <span class="title">{{ t.book.title }}{% if t.book.promoted %} ⭐{% endif %}</span>
+        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <form method="post" action="/p/{{ poll.id }}/vote-round1">
+    {% for t in tallies %}
+    <label class="book-check" style="text-transform:none; font-weight:400; margin:0;">
+      <input type="checkbox" name="book_ids" value="{{ t.book.id }}" {% if t.book.id in my_votes %}checked{% endif %}>
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <span class="book-check-text">
+        <span class="title">{{ t.book.title }}</span>
+        <span class="vote-count">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+      </span>
     </label>
     {% endfor %}
 
@@ -38,5 +66,6 @@
 
     <button type="submit">Confirmar votos</button>
   </form>
+  {% endif %}
 </div>
 {% endblock %}

@@ -29,6 +29,8 @@ from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SI
 
 Base.metadata.create_all(bind=engine)
 ensure_column("polls", "admin_email", "VARCHAR")
+ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
+ensure_column("books", "rejection_reason", "VARCHAR")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -99,6 +101,26 @@ def carry_cookie(source: Response, target):
     return target
 
 
+FORM_ERROR_MESSAGES = {
+    "isbn_duplicate": "Esse ISBN já foi indicado.",
+    "duplicate": "Esse livro já foi indicado.",
+    "quota": "Você já atingiu o limite de indicações.",
+    "captcha": "Falha na verificação anti-robô. Tente novamente.",
+    "too_many_voters": "Muitos votantes distintos a partir desta rede. Fale com o organizador.",
+    "phase_ended": "Essa fase acabou de ser encerrada — a página foi atualizada com a fase atual.",
+    "invalid_book": "Livro inválido para esta votação.",
+}
+
+
+def redirect_with_error(poll_id: str, code: str) -> RedirectResponse:
+    """Post-redirect-get with a flash error code, instead of raising an
+    HTTPException on a plain form POST. A raised exception on a normal
+    (non-fetch) form submit renders as a raw JSON error page in the
+    browser — this keeps the person on a normal HTML page with an inline
+    message instead."""
+    return RedirectResponse(url=f"/p/{poll_id}?error={code}", status_code=303)
+
+
 # ---------------------------------------------------------------- home / create
 
 @app.get("/", response_class=HTMLResponse)
@@ -112,12 +134,16 @@ def new_poll_form(request: Request):
 
 
 @app.get("/polls", response_class=HTMLResponse)
-def list_polls(request: Request, db: Session = Depends(get_db)):
+def list_polls(request: Request, status: str = "open", db: Session = Depends(get_db)):
+    status = status if status in ("open", "closed") else "open"
     all_polls = db.query(Poll).order_by(Poll.created_at.desc()).all()
-    ongoing = [(p, pl.get_phase(p)) for p in all_polls]
-    ongoing = [(p, phase) for p, phase in ongoing if phase != pl.PHASE_CLOSED]
+    tagged = [(p, pl.get_phase(p)) for p in all_polls]
+    if status == "closed":
+        tagged = [(p, phase) for p, phase in tagged if phase == pl.PHASE_CLOSED]
+    else:
+        tagged = [(p, phase) for p, phase in tagged if phase != pl.PHASE_CLOSED]
     return templates.TemplateResponse(
-        "poll_list.html", {"request": request, "ongoing": ongoing}
+        "poll_list.html", {"request": request, "polls": tagged, "status": status}
     )
 
 
@@ -195,52 +221,80 @@ async def create_poll(
 
 # ---------------------------------------------------------------------- poll page
 
+PHASE_ORDER = [pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2, pl.PHASE_CLOSED]
+
+
 @app.get("/p/{poll_id}", response_class=HTMLResponse)
 def view_poll(request: Request, poll_id: str, response: Response, db: Session = Depends(get_db)):
     poll = get_poll_or_404(db, poll_id)
     voter_id = get_or_set_voter_id(request, response)
     phase = pl.get_phase(poll)
+    current_index = PHASE_ORDER.index(phase)
+
+    # ?view=<phase> lets people revisit an already-concluded phase read-only
+    # (e.g. see the nomination list or round-1 tally after voting has moved
+    # on). Phases not reached yet are never viewable, no matter what's
+    # passed in the query string.
+    requested_view = request.query_params.get("view")
+    if requested_view in PHASE_ORDER and PHASE_ORDER.index(requested_view) <= current_index:
+        view_phase = requested_view
+    else:
+        view_phase = phase
+    read_only = view_phase != phase
 
     ctx = {
         "request": request,
         "poll": poll,
         "phase": phase,
+        "view_phase": view_phase,
+        "read_only": read_only,
         "captcha_enabled": CAPTCHA_ENABLED,
         "turnstile_site_key": TURNSTILE_SITE_KEY,
         "show_recovery": True,
+        "form_error": FORM_ERROR_MESSAGES.get(request.query_params.get("error")),
     }
 
-    if phase == pl.PHASE_NOMINATION:
-        books = db.query(Book).filter(Book.poll_id == poll.id).order_by(Book.created_at).all()
+    if view_phase == pl.PHASE_NOMINATION:
+        books = (
+            db.query(Book)
+            .filter(Book.poll_id == poll.id, Book.rejected.is_(False))
+            .order_by(Book.created_at)
+            .all()
+        )
         my_noms = [b for b in books if b.voter_id == voter_id]
         ctx.update(books=books, my_nom_count=len(my_noms))
         html = templates.TemplateResponse("poll_nominate.html", ctx)
 
-    elif phase == pl.PHASE_ROUND1:
-        books = db.query(Book).filter(Book.poll_id == poll.id).order_by(Book.title).all()
+    elif view_phase == pl.PHASE_ROUND1:
+        tallies = pl.tally(db, poll.id, round=1)
+        if read_only:
+            tallies.sort(key=lambda t: (-t.votes, t.book.title.lower()))
+        else:
+            tallies.sort(key=lambda t: t.book.title.lower())
         my_votes = {
             v.book_id
             for v in db.query(Vote)
             .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 1)
             .all()
         }
-        ctx.update(books=books, my_votes=my_votes)
+        ctx.update(tallies=tallies, my_votes=my_votes)
         html = templates.TemplateResponse("poll_vote_round1.html", ctx)
 
-    elif phase == pl.PHASE_ROUND2:
+    elif view_phase == pl.PHASE_ROUND2:
         pl.ensure_round1_promotion(db, poll)
-        books = (
-            db.query(Book)
-            .filter(Book.poll_id == poll.id, Book.promoted.is_(True))
-            .order_by(Book.title)
-            .all()
-        )
+        tallies = pl.tally(db, poll.id, round=2, promoted_only=True)
+        if read_only:
+            tallies.sort(key=lambda t: (-t.votes, t.book.title.lower()))
+        else:
+            tallies.sort(key=lambda t: t.book.title.lower())
         my_vote = (
             db.query(Vote)
             .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 2)
             .first()
         )
-        ctx.update(books=books, my_book_id=my_vote.book_id if my_vote else None)
+        my_book_id = my_vote.book_id if my_vote else None
+        my_book = next((t.book for t in tallies if t.book.id == my_book_id), None)
+        ctx.update(tallies=tallies, my_book_id=my_book_id, my_book=my_book)
         html = templates.TemplateResponse("poll_vote_round2.html", ctx)
 
     else:
@@ -277,27 +331,31 @@ async def nominate(
 ):
     poll = get_poll_or_404(db, poll_id)
     if pl.get_phase(poll) != pl.PHASE_NOMINATION:
-        raise HTTPException(400, "O período de indicações já terminou.")
+        return redirect_with_error(poll_id, "phase_ended")
 
     if not await verify_captcha(cf_turnstile_response, request):
-        raise HTTPException(400, "Falha na verificação anti-robô. Tente novamente.")
+        return redirect_with_error(poll_id, "captcha")
 
     response = Response()
     voter_id = get_or_set_voter_id(request, response)
     ip_h = hash_ip(request, poll.id)
 
     if not register_voter_identity(db, poll.id, ip_h, voter_id):
-        raise HTTPException(429, "Muitos votantes distintos a partir desta rede. Fale com o organizador.")
+        return redirect_with_error(poll_id, "too_many_voters")
 
-    existing_count = db.query(Book).filter(Book.poll_id == poll.id, Book.voter_id == voter_id).count()
+    existing_count = db.query(Book).filter(
+        Book.poll_id == poll.id, Book.voter_id == voter_id, Book.rejected.is_(False)
+    ).count()
     if existing_count >= (poll.max_noms_per_voter or 3):
-        raise HTTPException(400, "Você já atingiu o limite de indicações.")
+        return redirect_with_error(poll_id, "quota")
 
     isbn_clean = isbn.strip() or None
     if isbn_clean:
-        dup = db.query(Book).filter(Book.poll_id == poll.id, Book.isbn == isbn_clean).first()
+        dup = db.query(Book).filter(
+            Book.poll_id == poll.id, Book.isbn == isbn_clean, Book.rejected.is_(False)
+        ).first()
         if dup:
-            raise HTTPException(400, "Esse ISBN já foi indicado.")
+            return redirect_with_error(poll_id, "isbn_duplicate")
 
     thumb_clean = thumbnail_url.strip()
     if not (thumb_clean.startswith("http://") or thumb_clean.startswith("https://")):
@@ -317,7 +375,7 @@ async def nominate(
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(400, "Esse livro já foi indicado.")
+        return redirect_with_error(poll_id, "duplicate")
 
     return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
 
@@ -357,17 +415,17 @@ async def vote_round1(
 ):
     poll = get_poll_or_404(db, poll_id)
     if pl.get_phase(poll) != pl.PHASE_ROUND1:
-        raise HTTPException(400, "A 1ª fase de votação não está ativa.")
+        return redirect_with_error(poll_id, "phase_ended")
 
     if not await verify_captcha(cf_turnstile_response, request):
-        raise HTTPException(400, "Falha na verificação anti-robô. Tente novamente.")
+        return redirect_with_error(poll_id, "captcha")
 
     response = Response()
     voter_id = get_or_set_voter_id(request, response)
     ip_h = hash_ip(request, poll.id)
 
     if not register_voter_identity(db, poll.id, ip_h, voter_id):
-        raise HTTPException(429, "Muitos votantes distintos a partir desta rede. Fale com o organizador.")
+        return redirect_with_error(poll_id, "too_many_voters")
 
     valid_ids = {
         b.id for b in db.query(Book.id).filter(Book.poll_id == poll.id, Book.id.in_(book_ids)).all()
@@ -382,7 +440,7 @@ async def vote_round1(
         db.add(Vote(poll_id=poll.id, book_id=book_id, voter_id=voter_id, ip_hash=ip_h, round=1))
     db.commit()
 
-    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
+    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}?voted=1", status_code=303))
 
 
 @app.post("/p/{poll_id}/vote-round2")
@@ -396,19 +454,19 @@ async def vote_round2(
 ):
     poll = get_poll_or_404(db, poll_id)
     if pl.get_phase(poll) != pl.PHASE_ROUND2:
-        raise HTTPException(400, "A 2ª fase de votação não está ativa.")
+        return redirect_with_error(poll_id, "phase_ended")
 
     pl.ensure_round1_promotion(db, poll)
 
     if not await verify_captcha(cf_turnstile_response, request):
-        raise HTTPException(400, "Falha na verificação anti-robô. Tente novamente.")
+        return redirect_with_error(poll_id, "captcha")
 
     response = Response()
     voter_id = get_or_set_voter_id(request, response)
     ip_h = hash_ip(request, poll.id)
 
     if not register_voter_identity(db, poll.id, ip_h, voter_id):
-        raise HTTPException(429, "Muitos votantes distintos a partir desta rede. Fale com o organizador.")
+        return redirect_with_error(poll_id, "too_many_voters")
 
     book = (
         db.query(Book)
@@ -416,7 +474,7 @@ async def vote_round2(
         .first()
     )
     if not book:
-        raise HTTPException(400, "Livro inválido para a 2ª fase.")
+        return redirect_with_error(poll_id, "invalid_book")
 
     # single choice: replace any previous round-2 vote from this voter
     db.query(Vote).filter(
@@ -425,7 +483,7 @@ async def vote_round2(
     db.add(Vote(poll_id=poll.id, book_id=book.id, voter_id=voter_id, ip_hash=ip_h, round=2))
     db.commit()
 
-    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
+    return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}?voted=1", status_code=303))
 
 
 # --------------------------------------------------------------------------- admin
@@ -466,6 +524,36 @@ def admin_dashboard(request: Request, admin_token: str, db: Session = Depends(ge
             "tie_group_json": tie_group_json,
         },
     )
+
+
+@app.post("/admin/{admin_token}/books/{book_id}/reject")
+def reject_book(
+    admin_token: str, book_id: str, reason: str = Form(""), db: Session = Depends(get_db)
+):
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) != pl.PHASE_NOMINATION:
+        raise HTTPException(400, "Só é possível recusar indicações durante a fase de indicações.")
+    book = db.query(Book).filter(Book.id == book_id, Book.poll_id == poll.id).first()
+    if not book:
+        raise HTTPException(404, "Livro não encontrado.")
+    book.rejected = True
+    book.rejection_reason = reason.strip() or None
+    db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/books/{book_id}/unreject")
+def unreject_book(admin_token: str, book_id: str, db: Session = Depends(get_db)):
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) != pl.PHASE_NOMINATION:
+        raise HTTPException(400, "Só é possível reverter durante a fase de indicações.")
+    book = db.query(Book).filter(Book.id == book_id, Book.poll_id == poll.id).first()
+    if not book:
+        raise HTTPException(404, "Livro não encontrado.")
+    book.rejected = False
+    book.rejection_reason = None
+    db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 
 @app.post("/admin/{admin_token}/end-nomination")

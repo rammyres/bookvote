@@ -40,7 +40,7 @@
   <h2>Livros indicados ({{ books|length }})</h2>
   <ul class="book-list">
     {% for b in books %}
-    <li class="book-row">
+    <li class="book-row{% if b.rejected %} book-row-rejected{% endif %}">
       {% if b.thumbnail_url %}
       <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
       {% else %}
@@ -50,6 +50,22 @@
         <span class="title">{{ b.title }}</span>
         {% if b.author %}<span class="author"> — {{ b.author }}</span>{% endif %}
         {% if b.promoted %}<span class="isbn" style="float:right;">finalista</span>{% endif %}
+
+        {% if b.rejected %}
+        <div class="reject-note">
+          Recusado{% if b.rejection_reason %}: {{ b.rejection_reason }}{% endif %}
+          {% if phase == "nomination" %}
+          <form method="post" action="/admin/{{ poll.admin_token }}/books/{{ b.id }}/unreject" style="display:inline;">
+            <button type="submit" class="secondary link-button">reverter</button>
+          </form>
+          {% endif %}
+        </div>
+        {% elif phase == "nomination" %}
+        <form method="post" action="/admin/{{ poll.admin_token }}/books/{{ b.id }}/reject" class="reject-form">
+          <input type="text" name="reason" placeholder="Motivo (opcional): só e-book, não lançado no Brasil, só em sebo...">
+          <button type="submit" class="secondary" onclick="return confirm('Recusar esta indicação? Ela deixa de valer para a votação.');">Recusar indicação</button>
+        </form>
+        {% endif %}
       </div>
     </li>
     {% endfor %}
