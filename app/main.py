@@ -30,6 +30,7 @@ from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SI
 Base.metadata.create_all(bind=engine)
 ensure_column("polls", "admin_email", "VARCHAR")
 ensure_column("polls", "close_email_sent", "BOOLEAN DEFAULT 0")
+ensure_column("polls", "tie_email_sent", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
 
@@ -133,6 +134,36 @@ ADMIN_ERROR_MESSAGES = {
 
 def redirect_admin_with_error(admin_token: str, code: str) -> RedirectResponse:
     return RedirectResponse(url=f"/admin/{admin_token}?error={code}", status_code=303)
+
+
+async def maybe_notify_tie(db: Session, poll: Poll, request: Request) -> None:
+    """Sends a one-time "there's a tie, come run the draw" email as soon as
+    the final round closes with an unresolved 1st-place tie. Separate from
+    maybe_notify_closure, which deliberately stays silent until the tie is
+    resolved — without this, the admin would have no way to know a draw is
+    waiting on them unless they happened to check the poll themselves."""
+    if poll.tie_email_sent or not poll.admin_email:
+        return
+
+    results = pl.compute_final_results(db, poll)
+    if not results.tie_group or results.resolved:
+        return  # no tie, or already resolved (draw already run)
+
+    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    tied_titles = ", ".join(t.book.title for t in results.tie_group)
+    await send_email(
+        to=poll.admin_email,
+        subject=f"Empate na votação final — {poll.title}",
+        html=(
+            f"<p>A votação final da enquete <strong>{poll.title}</strong> terminou empatada "
+            f"em 1º lugar entre {len(results.tie_group)} livros: {tied_titles}.</p>"
+            f"<p>Entre no painel de administração para realizar o sorteio de desempate — "
+            f"o sorteio é restrito só aos livros empatados:</p>"
+            f'<p><a href="{admin_url}">{admin_url}</a></p>'
+        ),
+    )
+    poll.tie_email_sent = True
+    db.commit()
 
 
 async def maybe_notify_closure(db: Session, poll: Poll, request: Request) -> None:
@@ -274,6 +305,7 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
     current_index = PHASE_ORDER.index(phase)
 
     if phase == pl.PHASE_CLOSED:
+        await maybe_notify_tie(db, poll, request)
         await maybe_notify_closure(db, poll, request)
 
     # ?view=<phase> lets people revisit an already-concluded phase read-only
@@ -552,6 +584,7 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
         round2_tally = pl.tally(db, poll.id, round=2, promoted_only=True)
     if phase == pl.PHASE_CLOSED:
         results = pl.compute_final_results(db, poll)
+        await maybe_notify_tie(db, poll, request)
         await maybe_notify_closure(db, poll, request)
 
     tie_group_json = None

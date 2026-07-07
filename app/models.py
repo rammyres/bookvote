@@ -53,6 +53,8 @@ class Poll(Base):
     # set once the closure e-mail has been sent (only sent once results
     # are resolved — i.e. not while a 1st-place tie is still pending a draw)
     close_email_sent = Column(Boolean, default=False, nullable=False)
+    # set once the "there's a tie, come run the draw" e-mail has been sent
+    tie_email_sent = Column(Boolean, default=False, nullable=False)
 
     nomination_end = Column(DateTime, nullable=False)
     round1_end = Column(DateTime, nullable=False)  # multi-vote, all nominated books
