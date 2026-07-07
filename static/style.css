@@ -217,6 +217,12 @@ button:hover { opacity: 0.9; }
 .book-check-text {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.title-row {
+  display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
@@ -224,9 +230,34 @@ button:hover { opacity: 0.9; }
 
 .vote-count {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: #8a7c5c;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--stamp);
   white-space: nowrap;
+}
+
+.vote-badge {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--stamp);
+  white-space: nowrap;
+}
+
+.vote-bar {
+  height: 0.55rem;
+  background: var(--paper-dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.vote-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brass), var(--stamp));
+  border-radius: 3px 0 0 3px;
+  transition: width 0.3s ease;
 }
 
 .book-list li.book-row {

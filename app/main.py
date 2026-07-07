@@ -322,7 +322,7 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
             .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 1)
             .all()
         }
-        ctx.update(tallies=tallies, my_votes=my_votes)
+        ctx.update(tallies=tallies, my_votes=my_votes, max_votes=max((t.votes for t in tallies), default=0))
         html = templates.TemplateResponse("poll_vote_round1.html", ctx)
 
     elif view_phase == pl.PHASE_ROUND2:
@@ -339,13 +339,18 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
         )
         my_book_id = my_vote.book_id if my_vote else None
         my_book = next((t.book for t in tallies if t.book.id == my_book_id), None)
-        ctx.update(tallies=tallies, my_book_id=my_book_id, my_book=my_book)
+        ctx.update(
+            tallies=tallies,
+            my_book_id=my_book_id,
+            my_book=my_book,
+            max_votes=max((t.votes for t in tallies), default=0),
+        )
         html = templates.TemplateResponse("poll_vote_round2.html", ctx)
 
     else:
         pl.ensure_round1_promotion(db, poll)
         results = pl.compute_final_results(db, poll)
-        ctx.update(results=results)
+        ctx.update(results=results, max_votes=max((t.votes for t in results.ranked), default=0))
         html = templates.TemplateResponse("poll_results.html", ctx)
 
     return carry_cookie(response, html)
@@ -555,6 +560,9 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
             [{"id": t.book.id, "title": t.book.title} for t in results.tie_group]
         )
 
+    round1_max = max((t.votes for t in round1_tally), default=0)
+    round2_max = max((t.votes for t in round2_tally), default=0) if round2_tally else 0
+
     books = db.query(Book).filter(Book.poll_id == poll.id).order_by(Book.created_at).all()
 
     return templates.TemplateResponse(
@@ -565,7 +573,9 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
             "phase": phase,
             "books": books,
             "round1_tally": round1_tally,
+            "round1_max": round1_max,
             "round2_tally": round2_tally,
+            "round2_max": round2_max,
             "results": results,
             "tie_group_json": tie_group_json,
             "admin_error": ADMIN_ERROR_MESSAGES.get(request.query_params.get("error")),

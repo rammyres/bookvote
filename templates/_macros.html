@@ -1,0 +1,5 @@
+{% macro vote_bar(votes, max_votes) %}
+{% set pct = (votes / max_votes * 100) if max_votes else 0 %}
+{% set display_pct = (pct if pct >= 4 else 4) if votes > 0 else 0 %}
+<div class="vote-bar"><div class="vote-bar-fill" style="width: {{ display_pct }}%;"></div></div>
+{% endmacro %}

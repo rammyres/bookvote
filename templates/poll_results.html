@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import vote_bar %}
 {% block title %}{{ poll.title }} — resultado{% endblock %}
 {% block content %}
 <div class="card">
@@ -64,9 +65,12 @@
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
       <div class="book-row-text">
-        <span class="title">{{ t.book.title }}</span>
-        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
-        {% if t.book.author %}<br><span class="author">{{ t.book.author }}</span>{% endif %}
+        <span class="title-row">
+          <span class="title">{{ t.book.title }}</span>
+          <span class="vote-badge">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        </span>
+        {{ vote_bar(t.votes, max_votes) }}
+        {% if t.book.author %}<span class="author">{{ t.book.author }}</span>{% endif %}
       </div>
     </li>
     {% endfor %}

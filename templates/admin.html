@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import vote_bar %}
 {% block title %}Administração — {{ poll.title }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -142,8 +143,11 @@
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
       <div class="book-row-text">
-        <span class="title">{{ t.book.title }}{% if t.book.promoted %} ⭐{% endif %}</span>
-        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        <span class="title-row">
+          <span class="title">{{ t.book.title }}{% if t.book.promoted %} ⭐{% endif %}</span>
+          <span class="vote-badge">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        </span>
+        {{ vote_bar(t.votes, round1_max) }}
       </div>
     </li>
     {% endfor %}
@@ -164,8 +168,11 @@
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
       <div class="book-row-text">
-        <span class="title">{{ t.book.title }}</span>
-        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        <span class="title-row">
+          <span class="title">{{ t.book.title }}</span>
+          <span class="vote-badge">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        </span>
+        {{ vote_bar(t.votes, round2_max) }}
       </div>
     </li>
     {% endfor %}
@@ -193,8 +200,10 @@
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
       <div class="book-row-text">
-        <span class="title">{{ t.book.title }}</span>
-        <span class="isbn" style="float:right;">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        <span class="title-row">
+          <span class="title">{{ t.book.title }}</span>
+          <span class="vote-badge">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        </span>
       </div>
     </li>
     {% endfor %}
