@@ -14,6 +14,12 @@ sem contas de usuário.
   prontos ao clicar numa sugestão). Não achou o livro? Pode digitar
   qualquer texto e indicar assim mesmo, sem capa. Cada pessoa tem um limite
   configurável de indicações.
+- **Revisão (congelada)**: ao encerrar o prazo de indicações, a lista trava
+  automaticamente e a votação **não** começa sozinha — o organizador recebe
+  um e-mail avisando e precisa entrar no painel para revisar. Nessa fase
+  ainda dá pra recusar indicações (e reverter); só quando o organizador
+  clica em "Liberar para votação" (escolhendo o prazo da 1ª votação nesse
+  momento) é que ela realmente começa.
 - **Votação 1 (múltipla)**: a lista trava e todos os livros indicados entram
   na enquete, exibidos com capa (quando disponível) + nome. Cada visitante
   marca quantos livros quiser e pode voltar para trocar o voto até o prazo
@@ -61,8 +67,23 @@ sem contas de usuário.
 2. Cada IP só pode gerar um número limitado de "identidades" de votante por
    enquete (`BOOKVOTE_MAX_VOTERS_PER_IP`, padrão 6) — dificulta o padrão
    "limpar cookies e votar de novo" em escala.
-3. Captcha (Cloudflare Turnstile, gratuito) na indicação e no voto.
-4. Rate limiting por IP nas rotas de indicar/votar/criar enquete.
+3. **Log de votos apenas com inserção** (append-only): nenhum voto é
+   apagado. Cada envio de cédula grava linhas novas e anula (sem excluir)
+   os votos anteriores dessa mesma pessoa (`voter_id`) **ou** desse mesmo
+   IP (`ip_hash`) naquela rodada — só a cédula mais recente por IP conta na
+   apuração. Isso cria um rastro auditável completo e fecha o brecha de
+   "várias identidades de votante, cada uma votando de verdade" dentro do
+   limite do item 2 acima.
+4. Captcha (Cloudflare Turnstile, gratuito) na indicação e no voto.
+5. Rate limiting por IP nas rotas de indicar/votar/criar enquete.
+
+> **Consequência importante do item 3**: se várias pessoas votam a partir
+> do mesmo IP (Wi-Fi de casa, escritório, evento), só o voto mais recente
+> daquele IP conta — os votos anteriores da mesma rede são anulados, mesmo
+> vindos de pessoas diferentes. É uma troca deliberada: prioriza dificultar
+> fraude sobre justiça em redes compartilhadas. Se isso for um problema
+> para o seu público (ex: evento presencial numa rede única), a proteção
+> mais forte de verdade é autenticação real — login por e-mail ou Telegram.
 
 Nenhuma camada isolada é perfeita, mas juntas encarecem bastante o abuso
 para uma ferramenta deste porte. Se precisar de algo mais forte no futuro,

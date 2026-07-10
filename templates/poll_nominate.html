@@ -7,11 +7,17 @@
   <h1>{{ poll.title }}</h1>
   {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
 
+  {% include "_share_button.html" %}
+
   {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
 
   <div class="meta-row">
+    {% if real_phase == "review" %}
+    <span>Indicações encerradas em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong> — aguardando liberação da votação pelo organizador</span>
+    {% else %}
     <span>Indicações {{ 'encerraram' if read_only else 'encerram' }} em <strong data-utc="{{ poll.nomination_end.isoformat() }}Z"></strong></span>
     {% if not read_only %}<span>faltam <span data-countdown="{{ poll.nomination_end.isoformat() }}Z"></span></span>{% endif %}
+    {% endif %}
   </div>
 
   <h2>Livros indicados{% if not read_only %} até agora{% endif %} ({{ books|length }})</h2>
@@ -36,7 +42,7 @@
   {% endif %}
 </div>
 
-{% if not read_only %}
+{% if not read_only and real_phase == "nomination" %}
 <div class="card">
   <h2>Indicar um livro</h2>
   <p class="hint">Você já indicou {{ my_nom_count }} de {{ poll.max_noms_per_voter }} livros permitidos.</p>
@@ -251,6 +257,11 @@
   {% else %}
   <p class="hint">Você atingiu o limite de indicações para esta enquete.</p>
   {% endif %}
+</div>
+{% elif not read_only and real_phase == "review" %}
+<div class="card">
+  <h2>Indicações encerradas</h2>
+  <p class="hint">📋 As indicações foram encerradas e estão congeladas. O organizador está revisando a lista (pode recusar indicações que não sirvam) antes de liberar a votação. Volte mais tarde.</p>
 </div>
 {% endif %}
 {% endblock %}

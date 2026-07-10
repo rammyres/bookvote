@@ -1,0 +1,44 @@
+{% set share_phase = real_phase if real_phase is defined else phase %}
+<button type="button" id="share-btn-{{ poll.id }}" class="btn secondary share-btn"
+  data-title="{{ poll.title }}"
+  data-url="{{ request.url.scheme }}://{{ request.url.netloc }}/p/{{ poll.id }}"
+  data-phase="{{ share_phase }}"
+  {% if share_phase == "nomination" %}data-deadline="{{ poll.nomination_end.isoformat() }}Z"{% endif %}
+  {% if share_phase == "round1" %}data-deadline="{{ poll.round1_end.isoformat() }}Z"{% endif %}
+  {% if share_phase == "round2" %}data-deadline="{{ poll.round2_end.isoformat() }}Z"{% endif %}
+>🔗 Compartilhar</button>
+
+<script>
+(function () {
+  var btn = document.getElementById('share-btn-{{ poll.id }}');
+  if (!btn) return;
+
+  function fmt(iso) {
+    var d = new Date(iso);
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + ', ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  btn.addEventListener('click', function () {
+    var title = btn.dataset.title;
+    var url = btn.dataset.url;
+    var phase = btn.dataset.phase;
+    var deadline = btn.dataset.deadline;
+
+    var line;
+    if (phase === 'nomination') line = 'Indicações até ' + fmt(deadline);
+    else if (phase === 'review') line = 'Indicações encerradas — aguardando liberação da votação';
+    else if (phase === 'round1') line = 'Votação (1ª fase) até ' + fmt(deadline);
+    else if (phase === 'round2') line = 'Votação final até ' + fmt(deadline);
+    else line = 'Votação encerrada — confira o resultado!';
+
+    var text = '📚 ' + title + '\n' + line;
+
+    if (navigator.share) {
+      navigator.share({ title: title, text: text, url: url }).catch(function () {});
+    } else {
+      window.open('https://wa.me/?text=' + encodeURIComponent(text + '\n' + url), '_blank');
+    }
+  });
+})();
+</script>

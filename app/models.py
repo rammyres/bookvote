@@ -55,6 +55,10 @@ class Poll(Base):
     close_email_sent = Column(Boolean, default=False, nullable=False)
     # set once the "there's a tie, come run the draw" e-mail has been sent
     tie_email_sent = Column(Boolean, default=False, nullable=False)
+    # same, but for a round-1 -> round-2 promotion tie
+    promotion_tie_email_sent = Column(Boolean, default=False, nullable=False)
+    # set once the "nominations are frozen, come review them" e-mail has been sent
+    review_email_sent = Column(Boolean, default=False, nullable=False)
 
     nomination_end = Column(DateTime, nullable=False)
     round1_end = Column(DateTime, nullable=False)  # multi-vote, all nominated books
@@ -65,6 +69,10 @@ class Poll(Base):
 
     # optional per-voter limits (anti-flood, not anti-bot per se)
     max_noms_per_voter = Column(Integer, default=3)
+
+    # round 1 stays frozen (PHASE_REVIEW) after nomination_end until the
+    # admin explicitly releases it — see poll_logic.get_phase
+    round1_released = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=utcnow)
 
@@ -102,10 +110,14 @@ class Book(Base):
 
 
 class Vote(Base):
+    """Append-only vote log: every ballot ever cast stays in this table,
+    nothing is deleted. When someone (re)votes, their previous non-nullified
+    votes for that round — matched by voter_id OR ip_hash — get flagged
+    nullified instead of removed, and the new ballot's rows are inserted
+    fresh. Tallies only count nullified=False rows, giving "latest ballot
+    wins" semantics while preserving a full audit trail."""
+
     __tablename__ = "votes"
-    __table_args__ = (
-        UniqueConstraint("book_id", "voter_id", "round", name="uq_vote_book_voter_round"),
-    )
 
     id = Column(String, primary_key=True, default=gen_id)
     poll_id = Column(String, ForeignKey("polls.id"), nullable=False, index=True)
@@ -113,6 +125,11 @@ class Vote(Base):
     voter_id = Column(String, nullable=False, index=True)
     ip_hash = Column(String, nullable=False, index=True)
     round = Column(Integer, nullable=False)  # 1 = multi-vote phase, 2 = single-vote phase
+
+    # groups every row inserted together as one ballot submission
+    ballot_id = Column(String, nullable=True, index=True)
+    # True once superseded by a later ballot from the same voter_id/ip_hash
+    nullified = Column(Boolean, default=False, nullable=False, index=True)
 
     created_at = Column(DateTime, default=utcnow)
 
@@ -147,6 +164,8 @@ class DrawLog(Base):
 
     id = Column(String, primary_key=True, default=gen_id)
     poll_id = Column(String, ForeignKey("polls.id"), nullable=False, index=True)
+    # "promotion" (round 1 -> round 2 tie) or "champion" (round 2 -> winner tie)
+    kind = Column(String, nullable=False, default="champion")
     candidates_json = Column(Text, nullable=False)
     seed = Column(String, nullable=False)
     winner_book_ids_json = Column(Text, nullable=False)

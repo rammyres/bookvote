@@ -8,6 +8,8 @@
   <h1>{{ poll.title }}</h1>
   <p class="hint">Votação encerrada.</p>
 
+  {% include "_share_button.html" %}
+
   {% if results.champion %}
   <h2 style="margin-top:1.5rem;">📖 Livro escolhido</h2>
   <div class="spine-row champion-reveal">

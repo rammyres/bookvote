@@ -20,7 +20,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from .database import Base, engine, get_db, ensure_column
+from .database import Base, SessionLocal, engine, get_db, ensure_column
 from .models import Book, Poll, Vote, VoterIdentity, gen_short_id
 from . import poll_logic as pl
 from .book_search import search_books
@@ -28,11 +28,112 @@ from .email_sender import send_email
 from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SITE_KEY, CAPTCHA_ENABLED
 
 Base.metadata.create_all(bind=engine)
+
+
+def _migrate_votes_table() -> None:
+    """The old `votes` table had a UNIQUE(book_id, voter_id, round)
+    constraint from when a re-vote replaced the row in place. That's
+    incompatible with the new append-only ballot log (a re-vote now
+    inserts new rows instead), so detect the old constraint and rebuild
+    the table without it — preserving every vote already cast. SQLite has
+    no ALTER TABLE ... DROP CONSTRAINT, so this is a rename+recreate+copy."""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(votes)").fetchall()}
+        if not cols:
+            return  # table doesn't exist yet — create_all already made the new shape
+
+        indexes = conn.exec_driver_sql("PRAGMA index_list(votes)").fetchall()
+        # index tuple: (seq, name, unique, origin, partial). SQLite does NOT
+        # preserve the name we gave the constraint (it becomes an internal
+        # "sqlite_autoindex_..." name) — but a UNIQUE table constraint always
+        # shows origin='u', which the new schema never has, so that's the
+        # reliable signal that this is the pre-migration table shape.
+        has_old_constraint = any(idx[3] == "u" for idx in indexes)
+        if not has_old_constraint:
+            return
+
+        conn.exec_driver_sql("ALTER TABLE votes RENAME TO votes_old")
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE votes (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                poll_id VARCHAR NOT NULL,
+                book_id VARCHAR NOT NULL,
+                voter_id VARCHAR NOT NULL,
+                ip_hash VARCHAR NOT NULL,
+                round INTEGER NOT NULL,
+                ballot_id VARCHAR,
+                nullified BOOLEAN NOT NULL DEFAULT 0,
+                created_at DATETIME
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO votes (id, poll_id, book_id, voter_id, ip_hash, round, ballot_id, nullified, created_at)
+            SELECT id, poll_id, book_id, voter_id, ip_hash, round, NULL, 0, created_at FROM votes_old
+            """
+        )
+        conn.exec_driver_sql("DROP TABLE votes_old")
+        conn.exec_driver_sql("CREATE INDEX ix_votes_poll_id ON votes (poll_id)")
+        conn.exec_driver_sql("CREATE INDEX ix_votes_book_id ON votes (book_id)")
+        conn.exec_driver_sql("CREATE INDEX ix_votes_voter_id ON votes (voter_id)")
+        conn.exec_driver_sql("CREATE INDEX ix_votes_ip_hash ON votes (ip_hash)")
+        conn.exec_driver_sql("CREATE INDEX ix_votes_ballot_id ON votes (ballot_id)")
+        conn.exec_driver_sql("CREATE INDEX ix_votes_nullified ON votes (nullified)")
+        logging.getLogger("bookvote.main").warning(
+            "Rebuilt votes table without the old unique constraint — now an append-only ballot log."
+        )
+
+
+_migrate_votes_table()
+ensure_column("votes", "ballot_id", "VARCHAR")
+ensure_column("votes", "nullified", "BOOLEAN DEFAULT 0")
 ensure_column("polls", "admin_email", "VARCHAR")
 ensure_column("polls", "close_email_sent", "BOOLEAN DEFAULT 0")
 ensure_column("polls", "tie_email_sent", "BOOLEAN DEFAULT 0")
+ensure_column("polls", "review_email_sent", "BOOLEAN DEFAULT 0")
+ensure_column("polls", "promotion_tie_email_sent", "BOOLEAN DEFAULT 0")
+_round1_released_is_new = "round1_released" not in {
+    row[1]
+    for row in engine.connect().exec_driver_sql("PRAGMA table_info(polls)").fetchall()
+}
+ensure_column("polls", "round1_released", "BOOLEAN DEFAULT 0")
+if _round1_released_is_new:
+    # Existing polls (created before the review phase existed) already
+    # transitioned straight from nominations to round 1 under the old
+    # rules. Mark any poll whose nomination period is already over as
+    # "released", so they don't get retroactively frozen into PHASE_REVIEW.
+    with engine.begin() as _conn:
+        _conn.exec_driver_sql(
+            "UPDATE polls SET round1_released = 1 WHERE nomination_end <= CURRENT_TIMESTAMP"
+        )
 ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
+ensure_column("draws", "kind", "VARCHAR DEFAULT 'champion'")
+
+
+def _fix_over_promoted_polls() -> None:
+    """One-time cleanup for polls promoted under the old rule (all ties
+    advance, no 3-book cap). Any poll with more than 3 promoted books gets
+    its promotion reset so the new capped-at-3 logic re-evaluates it —
+    surfacing a draw if the tie is genuinely at the boundary."""
+    with SessionLocal() as db:
+        affected = db.query(Poll).filter(Poll.round1_promoted.is_(True)).all()
+        for poll in affected:
+            promoted = db.query(Book).filter(Book.poll_id == poll.id, Book.promoted.is_(True)).all()
+            if len(promoted) > 3:
+                for book in promoted:
+                    book.promoted = False
+                poll.round1_promoted = False
+                logging.getLogger("bookvote.main").warning(
+                    "Poll %s had %d promoted books (old no-cap rule) — reset for re-evaluation.",
+                    poll.id, len(promoted),
+                )
+        db.commit()
+
+
+_fix_over_promoted_polls()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -126,6 +227,7 @@ def redirect_with_error(poll_id: str, code: str) -> RedirectResponse:
 ADMIN_ERROR_MESSAGES = {
     "bad_dates": "Datas inválidas.",
     "not_extension": "O novo prazo precisa ser depois do prazo atual — isso é uma extensão, não uma antecipação.",
+    "must_be_future": "O prazo da votação precisa ser no futuro.",
     "phase_over": "Essa fase já foi concluída, não é mais possível estender o prazo dela.",
     "order": "O novo prazo entraria em conflito com o prazo de outra fase — estenda essa outra fase primeiro, se for o caso.",
     "bad_phase": "Fase inválida.",
@@ -134,6 +236,60 @@ ADMIN_ERROR_MESSAGES = {
 
 def redirect_admin_with_error(admin_token: str, code: str) -> RedirectResponse:
     return RedirectResponse(url=f"/admin/{admin_token}?error={code}", status_code=303)
+
+
+async def maybe_notify_review(db: Session, poll: Poll, request: Request) -> None:
+    """Sends a one-time "nominations are frozen, come review them" email as
+    soon as the nomination deadline passes and the poll enters PHASE_REVIEW."""
+    if poll.review_email_sent or not poll.admin_email:
+        return
+
+    books_count = (
+        db.query(Book).filter(Book.poll_id == poll.id, Book.rejected.is_(False)).count()
+    )
+    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    await send_email(
+        to=poll.admin_email,
+        subject=f"Indicações encerradas — {poll.title}",
+        html=(
+            f"<p>O prazo de indicações da enquete <strong>{poll.title}</strong> terminou — "
+            f"{books_count} livro{'s' if books_count != 1 else ''} na lista.</p>"
+            f"<p>As indicações estão congeladas por enquanto. Revise a lista (você ainda pode "
+            f"recusar indicações) e libere a votação quando estiver pronto:</p>"
+            f'<p><a href="{admin_url}">{admin_url}</a></p>'
+        ),
+    )
+    poll.review_email_sent = True
+    db.commit()
+
+
+async def maybe_notify_promotion_tie(db: Session, poll: Poll, request: Request) -> None:
+    """Sends a one-time "there's a tie for the last finalist spot(s)" email
+    once round 1 ends with more books tied at the cutoff than there's room
+    for in the top 3."""
+    if poll.promotion_tie_email_sent or not poll.admin_email:
+        return
+
+    promotion = pl.compute_round1_promotion(db, poll)
+    if not promotion.tie_group or promotion.resolved:
+        return
+
+    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    tied_titles = ", ".join(t.book.title for t in promotion.tie_group)
+    await send_email(
+        to=poll.admin_email,
+        subject=f"Empate na 1ª votação — {poll.title}",
+        html=(
+            f"<p>A 1ª votação da enquete <strong>{poll.title}</strong> terminou empatada "
+            f"para {promotion.slots_needed} vaga{'s' if promotion.slots_needed != 1 else ''} "
+            f"restante{'s' if promotion.slots_needed != 1 else ''} no top 3, entre "
+            f"{len(promotion.tie_group)} livros: {tied_titles}.</p>"
+            f"<p>Entre no painel para realizar o sorteio — restrito só aos livros empatados:</p>"
+            f'<p><a href="{admin_url}">{admin_url}</a></p>'
+        ),
+    )
+    poll.promotion_tie_email_sent = True
+    db.commit()
 
 
 async def maybe_notify_tie(db: Session, poll: Poll, request: Request) -> None:
@@ -301,10 +457,17 @@ PHASE_ORDER = [pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2, pl.PHASE_C
 async def view_poll(request: Request, poll_id: str, response: Response, db: Session = Depends(get_db)):
     poll = get_poll_or_404(db, poll_id)
     voter_id = get_or_set_voter_id(request, response)
-    phase = pl.get_phase(poll)
+    real_phase = pl.get_phase(poll)
+    # PHASE_REVIEW shares the "Indicações" tab with PHASE_NOMINATION — it's
+    # still the same step from a visitor's point of view, just frozen.
+    phase = pl.PHASE_NOMINATION if real_phase == pl.PHASE_REVIEW else real_phase
     current_index = PHASE_ORDER.index(phase)
 
-    if phase == pl.PHASE_CLOSED:
+    if real_phase == pl.PHASE_REVIEW:
+        await maybe_notify_review(db, poll, request)
+    if real_phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
+        await maybe_notify_promotion_tie(db, poll, request)
+    if real_phase == pl.PHASE_CLOSED:
         await maybe_notify_tie(db, poll, request)
         await maybe_notify_closure(db, poll, request)
 
@@ -323,6 +486,7 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
         "request": request,
         "poll": poll,
         "phase": phase,
+        "real_phase": real_phase,
         "view_phase": view_phase,
         "read_only": read_only,
         "captcha_enabled": CAPTCHA_ENABLED,
@@ -351,39 +515,62 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
         my_votes = {
             v.book_id
             for v in db.query(Vote)
-            .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 1)
+            .filter(
+                Vote.poll_id == poll.id,
+                Vote.voter_id == voter_id,
+                Vote.round == 1,
+                Vote.nullified.is_(False),
+            )
             .all()
         }
         ctx.update(tallies=tallies, my_votes=my_votes, max_votes=max((t.votes for t in tallies), default=0))
         html = templates.TemplateResponse("poll_vote_round1.html", ctx)
 
     elif view_phase == pl.PHASE_ROUND2:
-        pl.ensure_round1_promotion(db, poll)
-        tallies = pl.tally(db, poll.id, round=2, promoted_only=True)
-        if read_only:
-            tallies.sort(key=lambda t: (-t.votes, t.book.title.lower()))
+        promotion = pl.finalize_round1_promotion(db, poll)
+        if not promotion.resolved:
+            ctx.update(promotion=promotion)
+            html = templates.TemplateResponse("poll_vote_round2.html", ctx)
         else:
-            tallies.sort(key=lambda t: t.book.title.lower())
-        my_vote = (
-            db.query(Vote)
-            .filter(Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 2)
-            .first()
-        )
-        my_book_id = my_vote.book_id if my_vote else None
-        my_book = next((t.book for t in tallies if t.book.id == my_book_id), None)
-        ctx.update(
-            tallies=tallies,
-            my_book_id=my_book_id,
-            my_book=my_book,
-            max_votes=max((t.votes for t in tallies), default=0),
-        )
-        html = templates.TemplateResponse("poll_vote_round2.html", ctx)
+            tallies = pl.tally(db, poll.id, round=2, promoted_only=True)
+            if read_only:
+                tallies.sort(key=lambda t: (-t.votes, t.book.title.lower()))
+            else:
+                tallies.sort(key=lambda t: t.book.title.lower())
+            my_vote = (
+                db.query(Vote)
+                .filter(
+                    Vote.poll_id == poll.id,
+                    Vote.voter_id == voter_id,
+                    Vote.round == 2,
+                    Vote.nullified.is_(False),
+                )
+                .first()
+            )
+            my_book_id = my_vote.book_id if my_vote else None
+            my_book = next((t.book for t in tallies if t.book.id == my_book_id), None)
+            ctx.update(
+                tallies=tallies,
+                my_book_id=my_book_id,
+                my_book=my_book,
+                max_votes=max((t.votes for t in tallies), default=0),
+                promotion=promotion,
+            )
+            html = templates.TemplateResponse("poll_vote_round2.html", ctx)
 
     else:
-        pl.ensure_round1_promotion(db, poll)
-        results = pl.compute_final_results(db, poll)
-        ctx.update(results=results, max_votes=max((t.votes for t in results.ranked), default=0))
-        html = templates.TemplateResponse("poll_results.html", ctx)
+        promotion = pl.finalize_round1_promotion(db, poll)
+        if not promotion.resolved:
+            ctx.update(promotion=promotion)
+            html = templates.TemplateResponse("poll_results.html", ctx)
+        else:
+            results = pl.compute_final_results(db, poll)
+            ctx.update(
+                results=results,
+                max_votes=max((t.votes for t in results.ranked), default=0),
+                promotion=promotion,
+            )
+            html = templates.TemplateResponse("poll_results.html", ctx)
 
     return carry_cookie(response, html)
 
@@ -509,18 +696,14 @@ async def vote_round1(
     if not register_voter_identity(db, poll.id, ip_h, voter_id):
         return redirect_with_error(poll_id, "too_many_voters")
 
-    valid_ids = {
+    valid_ids = [
         b.id for b in db.query(Book.id).filter(Book.poll_id == poll.id, Book.id.in_(book_ids)).all()
-    }
+    ]
 
-    # Replace this voter's round-1 ballot so people can change their mind
-    # up until the deadline; round-2 votes (a different `round`) are untouched.
-    db.query(Vote).filter(
-        Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 1
-    ).delete()
-    for book_id in valid_ids:
-        db.add(Vote(poll_id=poll.id, book_id=book_id, voter_id=voter_id, ip_hash=ip_h, round=1))
-    db.commit()
+    # Append-only: nullifies this voter's/this IP's earlier round-1 ballot
+    # (people can still change their mind up until the deadline) and inserts
+    # the new one as fresh rows — nothing is ever deleted.
+    pl.record_ballot(db, poll.id, round=1, voter_id=voter_id, ip_hash=ip_h, book_ids=valid_ids)
 
     return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}?voted=1", status_code=303))
 
@@ -538,7 +721,7 @@ async def vote_round2(
     if pl.get_phase(poll) != pl.PHASE_ROUND2:
         return redirect_with_error(poll_id, "phase_ended")
 
-    pl.ensure_round1_promotion(db, poll)
+    pl.finalize_round1_promotion(db, poll)
 
     if not await verify_captcha(cf_turnstile_response, request):
         return redirect_with_error(poll_id, "captcha")
@@ -558,12 +741,8 @@ async def vote_round2(
     if not book:
         return redirect_with_error(poll_id, "invalid_book")
 
-    # single choice: replace any previous round-2 vote from this voter
-    db.query(Vote).filter(
-        Vote.poll_id == poll.id, Vote.voter_id == voter_id, Vote.round == 2
-    ).delete()
-    db.add(Vote(poll_id=poll.id, book_id=book.id, voter_id=voter_id, ip_hash=ip_h, round=2))
-    db.commit()
+    # single choice, but same append-only/nullify mechanism as round 1
+    pl.record_ballot(db, poll.id, round=2, voter_id=voter_id, ip_hash=ip_h, book_ids=[book.id])
 
     return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}?voted=1", status_code=303))
 
@@ -575,14 +754,24 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
     poll = get_poll_by_admin_token_or_404(db, admin_token)
     phase = pl.get_phase(poll)
 
-    round1_tally = pl.tally(db, poll.id, round=1) if phase != pl.PHASE_NOMINATION else []
+    if phase == pl.PHASE_REVIEW:
+        await maybe_notify_review(db, poll, request)
+
+    round1_tally = (
+        pl.tally(db, poll.id, round=1)
+        if phase not in (pl.PHASE_NOMINATION, pl.PHASE_REVIEW)
+        else []
+    )
     round2_tally = None
     results = None
+    promotion = None
 
     if phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
-        pl.ensure_round1_promotion(db, poll)
-        round2_tally = pl.tally(db, poll.id, round=2, promoted_only=True)
-    if phase == pl.PHASE_CLOSED:
+        promotion = pl.finalize_round1_promotion(db, poll)
+        await maybe_notify_promotion_tie(db, poll, request)
+        if promotion.resolved:
+            round2_tally = pl.tally(db, poll.id, round=2, promoted_only=True)
+    if phase == pl.PHASE_CLOSED and promotion and promotion.resolved:
         results = pl.compute_final_results(db, poll)
         await maybe_notify_tie(db, poll, request)
         await maybe_notify_closure(db, poll, request)
@@ -591,6 +780,11 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
     if results and results.tie_group:
         tie_group_json = json.dumps(
             [{"id": t.book.id, "title": t.book.title} for t in results.tie_group]
+        )
+    promotion_tie_json = None
+    if promotion and promotion.tie_group and not promotion.resolved:
+        promotion_tie_json = json.dumps(
+            [{"id": t.book.id, "title": t.book.title} for t in promotion.tie_group]
         )
 
     round1_max = max((t.votes for t in round1_tally), default=0)
@@ -610,7 +804,9 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
             "round2_tally": round2_tally,
             "round2_max": round2_max,
             "results": results,
+            "promotion": promotion,
             "tie_group_json": tie_group_json,
+            "promotion_tie_json": promotion_tie_json,
             "admin_error": ADMIN_ERROR_MESSAGES.get(request.query_params.get("error")),
         },
     )
@@ -621,8 +817,8 @@ def reject_book(
     admin_token: str, book_id: str, reason: str = Form(""), db: Session = Depends(get_db)
 ):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
-    if pl.get_phase(poll) != pl.PHASE_NOMINATION:
-        raise HTTPException(400, "Só é possível recusar indicações durante a fase de indicações.")
+    if pl.get_phase(poll) not in (pl.PHASE_NOMINATION, pl.PHASE_REVIEW):
+        raise HTTPException(400, "Só é possível recusar indicações antes da votação começar.")
     book = db.query(Book).filter(Book.id == book_id, Book.poll_id == poll.id).first()
     if not book:
         raise HTTPException(404, "Livro não encontrado.")
@@ -635,8 +831,8 @@ def reject_book(
 @app.post("/admin/{admin_token}/books/{book_id}/unreject")
 def unreject_book(admin_token: str, book_id: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
-    if pl.get_phase(poll) != pl.PHASE_NOMINATION:
-        raise HTTPException(400, "Só é possível reverter durante a fase de indicações.")
+    if pl.get_phase(poll) not in (pl.PHASE_NOMINATION, pl.PHASE_REVIEW):
+        raise HTTPException(400, "Só é possível reverter antes da votação começar.")
     book = db.query(Book).filter(Book.id == book_id, Book.poll_id == poll.id).first()
     if not book:
         raise HTTPException(404, "Livro não encontrado.")
@@ -672,7 +868,7 @@ def extend_deadline(
         poll.nomination_end = new_end
 
     elif phase_field == "round1":
-        if current_phase not in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1):
+        if current_phase not in (pl.PHASE_NOMINATION, pl.PHASE_REVIEW, pl.PHASE_ROUND1):
             return redirect_admin_with_error(admin_token, "phase_over")
         if new_end <= pl.as_aware(poll.round1_end):
             return redirect_admin_with_error(admin_token, "not_extension")
@@ -681,7 +877,9 @@ def extend_deadline(
         poll.round1_end = new_end
 
     elif phase_field == "round2":
-        if current_phase not in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2):
+        if current_phase not in (
+            pl.PHASE_NOMINATION, pl.PHASE_REVIEW, pl.PHASE_ROUND1, pl.PHASE_ROUND2
+        ):
             return redirect_admin_with_error(admin_token, "phase_over")
         if new_end <= pl.as_aware(poll.round2_end):
             return redirect_admin_with_error(admin_token, "not_extension")
@@ -690,6 +888,36 @@ def extend_deadline(
     else:
         return redirect_admin_with_error(admin_token, "bad_phase")
 
+    db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/release-round1")
+def release_round1(
+    admin_token: str,
+    round1_end_local: str = Form(...),
+    tz_offset: int = Form(0),
+    db: Session = Depends(get_db),
+):
+    """Unfreezes nominations-are-over review and starts round 1, with the
+    admin choosing the voting window at the moment of release (the value
+    set at poll creation may be stale by now if review took a while)."""
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) != pl.PHASE_REVIEW:
+        return redirect_admin_with_error(admin_token, "phase_over")
+
+    try:
+        new_round1_end = parse_local_datetime(round1_end_local, tz_offset)
+    except ValueError:
+        return redirect_admin_with_error(admin_token, "bad_dates")
+
+    if new_round1_end <= pl.now():
+        return redirect_admin_with_error(admin_token, "must_be_future")
+    if new_round1_end >= pl.as_aware(poll.round2_end):
+        return redirect_admin_with_error(admin_token, "order")
+
+    poll.round1_end = new_round1_end
+    poll.round1_released = True
     db.commit()
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
@@ -706,10 +934,8 @@ def end_nomination(admin_token: str, db: Session = Depends(get_db)):
 @app.post("/admin/{admin_token}/end-round1")
 def end_round1(admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
-    if pl.get_phase(poll) in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1):
-        t = pl.now()
-        poll.nomination_end = min(pl.as_aware(poll.nomination_end), t)
-        poll.round1_end = t
+    if pl.get_phase(poll) == pl.PHASE_ROUND1:
+        poll.round1_end = pl.now()
         db.commit()
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
@@ -717,11 +943,16 @@ def end_round1(admin_token: str, db: Session = Depends(get_db)):
 @app.post("/admin/{admin_token}/end-round2")
 def end_round2(admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
-    if pl.get_phase(poll) in (pl.PHASE_NOMINATION, pl.PHASE_ROUND1, pl.PHASE_ROUND2):
+    if pl.get_phase(poll) in (
+        pl.PHASE_NOMINATION, pl.PHASE_REVIEW, pl.PHASE_ROUND1, pl.PHASE_ROUND2
+    ):
         t = pl.now()
         poll.nomination_end = min(pl.as_aware(poll.nomination_end), t)
         poll.round1_end = min(pl.as_aware(poll.round1_end), t)
         poll.round2_end = t
+        # "end everything now" is an override — it bypasses the review gate
+        # too, otherwise the poll would stay stuck in PHASE_REVIEW forever.
+        poll.round1_released = True
         db.commit()
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 

@@ -20,7 +20,7 @@
       <div class="book-row-text">
         <a href="/p/{{ poll.id }}" class="title" style="text-decoration:underline;">{{ poll.title }}</a>
         <span class="isbn" style="float:right;">
-          {{ {"nomination": "Indicações", "round1": "Votação 1", "round2": "Votação 2", "closed": "Encerrada"}[phase] }}
+          {{ {"nomination": "Indicações", "review": "Indicações (revisão)", "round1": "Votação 1", "round2": "Votação 2", "closed": "Encerrada"}[phase] }}
         </span>
         {% if poll.description %}<br><span class="author">{{ poll.description }}</span>{% endif %}
       </div>

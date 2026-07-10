@@ -4,7 +4,7 @@
 <div class="card">
   <p class="hint"><a href="/">← Voltar</a></p>
   <h1>Criar uma enquete de livros</h1>
-  <p class="poll-desc">1ª fase: qualquer pessoa indica livros. 2ª fase: todo mundo vota em quantos livros quiser. 3ª fase: só os 3 mais votados (empates incluídos) disputam um voto único por pessoa, valendo o campeão.</p>
+  <p class="poll-desc">1ª fase: qualquer pessoa indica livros. Ao encerrar, a lista fica congelada até você liberar a votação. 2ª fase: todo mundo vota em quantos livros quiser. 3ª fase: só os 3 mais votados (empates incluídos) disputam um voto único por pessoa, valendo o campeão.</p>
 
   <form method="post" action="/polls">
     <label for="title">Título da enquete</label>
@@ -15,11 +15,11 @@
 
     <label for="nomination_end_local">Indicações encerram em</label>
     <input type="datetime-local" id="nomination_end_local" name="nomination_end_local" required>
-    <p class="hint">Até esse momento, qualquer pessoa com o link pode sugerir livros.</p>
+    <p class="hint">Até esse momento, qualquer pessoa com o link pode sugerir livros. Depois disso a lista fica congelada — você revisa (pode recusar indicações) e libera a votação quando quiser, não é automático.</p>
 
     <label for="round1_end_local">1ª votação encerra em</label>
     <input type="datetime-local" id="round1_end_local" name="round1_end_local" required>
-    <p class="hint">Todos os livros indicados entram nessa votação; cada pessoa marca quantos quiser.</p>
+    <p class="hint">Todos os livros indicados entram nessa votação; cada pessoa marca quantos quiser. Esse horário é só um ponto de partida — você confirma (ou ajusta) o prazo de verdade no momento em que liberar a votação.</p>
 
     <label for="round2_end_local">2ª votação encerra em</label>
     <input type="datetime-local" id="round2_end_local" name="round2_end_local" required>

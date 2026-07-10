@@ -11,21 +11,34 @@
   <label>Link público (compartilhe com os participantes)</label>
   <div class="admin-link-box" id="public-link">{{ request.url.scheme }}://{{ request.url.netloc }}/p/{{ poll.id }}</div>
 
+  {% include "_share_button.html" %}
+
   <p class="hint">
     {% if poll.admin_email %}E-mail de recuperação: {{ poll.admin_email }}{% else %}Nenhum e-mail de recuperação configurado para esta enquete.{% endif %}
   </p>
 
   <div class="meta-row">
-    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada"}[phase] }}</strong></span>
+    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "review": "Indicações encerradas (revisão)", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada"}[phase] }}</strong></span>
   </div>
 
   {% if admin_error %}<div class="warning-box">{{ admin_error }}</div>{% endif %}
 
-  {% set current_index = {"nomination": 0, "round1": 1, "round2": 2, "closed": 3}[phase] %}
+  {% set current_index = {"nomination": 0, "review": 1, "round1": 1, "round2": 2, "closed": 3}[phase] %}
 
   {% if phase == "nomination" %}
-  <form method="post" action="/admin/{{ poll.admin_token }}/end-nomination" onsubmit="return confirm('Encerrar indicações agora e passar para a 1ª votação?');">
+  <form method="post" action="/admin/{{ poll.admin_token }}/end-nomination" onsubmit="return confirm('Encerrar indicações agora? A lista fica congelada até você liberar a votação.');">
     <button type="submit" class="secondary">Encerrar indicações agora</button>
+  </form>
+  {% elif phase == "review" %}
+  <p class="hint">
+    Indicações encerradas — {{ books|length }} livro{{ 's' if books|length != 1 else '' }} na lista
+    ({{ books|selectattr('rejected')|list|length }} recusado{{ 's' if books|selectattr('rejected')|list|length != 1 else '' }}).
+    Revise abaixo (ainda dá pra recusar) e libere a votação quando estiver pronto.
+  </p>
+  <form method="post" action="/admin/{{ poll.admin_token }}/release-round1" class="extend-form" onsubmit="return confirm('Liberar a votação múltipla agora? As indicações continuam congeladas depois disso.');">
+    <input type="hidden" name="tz_offset" value="0">
+    <input type="datetime-local" name="round1_end_local" required data-current-utc="{{ poll.round1_end.isoformat() }}Z">
+    <button type="submit">Liberar para votação</button>
   </form>
   {% elif phase == "round1" %}
   <form method="post" action="/admin/{{ poll.admin_token }}/end-round1" onsubmit="return confirm('Encerrar a 1ª votação agora e apurar os finalistas?');">
@@ -113,13 +126,13 @@
         {% if b.rejected %}
         <div class="reject-note">
           Recusado{% if b.rejection_reason %}: {{ b.rejection_reason }}{% endif %}
-          {% if phase == "nomination" %}
+          {% if phase in ("nomination", "review") %}
           <form method="post" action="/admin/{{ poll.admin_token }}/books/{{ b.id }}/unreject" style="display:inline;">
             <button type="submit" class="secondary link-button">reverter</button>
           </form>
           {% endif %}
         </div>
-        {% elif phase == "nomination" %}
+        {% elif phase in ("nomination", "review") %}
         <form method="post" action="/admin/{{ poll.admin_token }}/books/{{ b.id }}/reject" class="reject-form">
           <input type="text" name="reason" placeholder="Motivo (opcional): só e-book, não lançado no Brasil, só em sebo...">
           <button type="submit" class="secondary" onclick="return confirm('Recusar esta indicação? Ela deixa de valer para a votação.');">Recusar indicação</button>

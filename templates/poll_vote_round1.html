@@ -8,6 +8,8 @@
   <h1>{{ poll.title }}</h1>
   {% if poll.description %}<p class="poll-desc">{{ poll.description }}</p>{% endif %}
 
+  {% include "_share_button.html" %}
+
   {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
 
   <div class="meta-row">
