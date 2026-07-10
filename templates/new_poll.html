@@ -4,7 +4,7 @@
 <div class="card">
   <p class="hint"><a href="/">← Voltar</a></p>
   <h1>Criar uma enquete de livros</h1>
-  <p class="poll-desc">1ª fase: qualquer pessoa indica livros. Ao encerrar, a lista fica congelada até você liberar a votação. 2ª fase: todo mundo vota em quantos livros quiser. 3ª fase: só os 3 mais votados (empates incluídos) disputam um voto único por pessoa, valendo o campeão.</p>
+  <p class="poll-desc">1ª fase: qualquer pessoa indica livros. Ao encerrar, a lista fica congelada até você liberar a votação. 2ª fase: todo mundo vota em quantos livros quiser. 3ª fase: os mais votados (top 3, por padrão — você escolhe como tratar empates no corte) disputam um voto único por pessoa, valendo o campeão.</p>
 
   <form method="post" action="/polls">
     <label for="title">Título da enquete</label>
@@ -23,7 +23,18 @@
 
     <label for="round2_end_local">2ª votação encerra em</label>
     <input type="datetime-local" id="round2_end_local" name="round2_end_local" required>
-    <p class="hint">Só os 3 mais votados da 1ª fase (empates incluídos) entram aqui; cada pessoa vota em 1 só.</p>
+    <p class="hint">Só os mais votados da 1ª fase entram aqui (veja a opção de empate abaixo); cada pessoa vota em 1 só.</p>
+
+    <label>Empate no corte entre a 1ª e a 2ª votação (top 3)</label>
+    <label class="book-check">
+      <input type="radio" name="promotion_tie_policy" value="draw" checked>
+      <span class="book-check-text">Sortear entre os livros empatados na última vaga — a 2ª votação fica sempre com no máximo 3 finalistas</span>
+    </label>
+    <label class="book-check">
+      <input type="radio" name="promotion_tie_policy" value="all_advance">
+      <span class="book-check-text">Levar todos os empatados para a 2ª votação — pode passar de 3 finalistas, mas ninguém é eliminado por sorteio</span>
+    </label>
+    <p class="hint">Vale só para o corte da 1ª pra 2ª fase. Um empate em 1º lugar na votação final sempre é resolvido por sorteio, não dá pra ter dois campeões.</p>
 
     <label for="max_noms_per_voter">Máximo de indicações por pessoa</label>
     <input type="number" id="max_noms_per_voter" name="max_noms_per_voter" value="3" min="1" max="20">

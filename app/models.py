@@ -74,6 +74,13 @@ class Poll(Base):
     # admin explicitly releases it — see poll_logic.get_phase
     round1_released = Column(Boolean, default=False, nullable=False)
 
+    # what happens when a tie lands exactly on the round-1 -> round-2 cutoff
+    # (top 3): "draw" runs a lottery restricted to the tied books, keeping
+    # round 2 capped at exactly 3 finalists (the default). "all_advance"
+    # waves every tied book through instead, so round 2 can end up with
+    # more than 3 finalists. Chosen once, at poll creation.
+    promotion_tie_policy = Column(String, default="draw", nullable=False)
+
     created_at = Column(DateTime, default=utcnow)
 
     books = relationship("Book", back_populates="poll", cascade="all, delete-orphan")

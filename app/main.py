@@ -111,15 +111,22 @@ if _round1_released_is_new:
 ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
 ensure_column("draws", "kind", "VARCHAR DEFAULT 'champion'")
+ensure_column("polls", "promotion_tie_policy", "VARCHAR DEFAULT 'draw'")
 
 
 def _fix_over_promoted_polls() -> None:
     """One-time cleanup for polls promoted under the old rule (all ties
     advance, no 3-book cap). Any poll with more than 3 promoted books gets
     its promotion reset so the new capped-at-3 logic re-evaluates it —
-    surfacing a draw if the tie is genuinely at the boundary."""
+    surfacing a draw if the tie is genuinely at the boundary. Skips polls
+    that deliberately opted into promotion_tie_policy == "all_advance",
+    since >3 promoted books is expected and correct for those."""
     with SessionLocal() as db:
-        affected = db.query(Poll).filter(Poll.round1_promoted.is_(True)).all()
+        affected = (
+            db.query(Poll)
+            .filter(Poll.round1_promoted.is_(True), Poll.promotion_tie_policy != "all_advance")
+            .all()
+        )
         for poll in affected:
             promoted = db.query(Book).filter(Book.poll_id == poll.id, Book.promoted.is_(True)).all()
             if len(promoted) > 3:
@@ -388,11 +395,15 @@ async def create_poll(
     tz_offset: int = Form(0),
     max_noms_per_voter: int = Form(3),
     admin_email: str = Form(""),
+    promotion_tie_policy: str = Form("draw"),
     db: Session = Depends(get_db),
 ):
     nomination_end = parse_local_datetime(nomination_end_local, tz_offset)
     round1_end = parse_local_datetime(round1_end_local, tz_offset)
     round2_end = parse_local_datetime(round2_end_local, tz_offset)
+
+    if promotion_tie_policy not in ("draw", "all_advance"):
+        raise HTTPException(400, "Opção de desempate inválida.")
 
     if nomination_end <= pl.now():
         raise HTTPException(400, "O fim das indicações precisa ser no futuro.")
@@ -417,6 +428,7 @@ async def create_poll(
             round2_end=round2_end,
             max_noms_per_voter=max_noms_per_voter,
             admin_email=admin_email_clean or None,
+            promotion_tie_policy=promotion_tie_policy,
         )
         db.add(candidate)
         try:

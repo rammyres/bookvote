@@ -115,10 +115,14 @@ class PromotionResult:
 
 
 def compute_round1_promotion(db: Session, poll: Poll) -> PromotionResult:
-    """Figures out who advances to round 2, capped at exactly 3. If more
-    books are tied for the last spot(s) than there is room for, that
-    group — and ONLY that group — needs a draw to narrow down to the
-    remaining slots. Mirrors compute_final_results's tie-break shape."""
+    """Figures out who advances to round 2. By default (poll.promotion_tie_policy
+    == "draw"), capped at exactly 3: if more books are tied for the last
+    spot(s) than there is room for, that group — and ONLY that group —
+    needs a draw to narrow down to the remaining slots, mirroring
+    compute_final_results's tie-break shape. If the poll opted into
+    "all_advance" instead, every book tied at the cutoff is waved through
+    directly, so round 2 can end up with more than 3 finalists and no
+    draw is ever needed here."""
     ranked = tally(db, poll.id, round=1)
     if not ranked:
         return PromotionResult(ranked=[], secured=[], tie_group=[], slots_needed=0, resolved=True, draw=None)
@@ -134,10 +138,11 @@ def compute_round1_promotion(db: Session, poll: Poll) -> PromotionResult:
     tie_group: list[Tally] = []
     slots_needed = 0
     remaining = 3
+    all_advance = poll.promotion_tie_policy == "all_advance"
     for _votes, members in groups:
         if remaining <= 0:
             break
-        if len(members) <= remaining:
+        if len(members) <= remaining or all_advance:
             secured.extend(members)
             remaining -= len(members)
         else:
