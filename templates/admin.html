@@ -169,6 +169,39 @@
 </div>
 {% endif %}
 
+{% if promotion and promotion.tie_group and not promotion.resolved %}
+<div class="card">
+  <h2>Empate na 1ª votação</h2>
+  <div class="tie-banner">
+    Empate para {{ promotion.slots_needed }} vaga{{ 's' if promotion.slots_needed != 1 else '' }}
+    restante{{ 's' if promotion.slots_needed != 1 else '' }} no top 3, entre
+    {{ promotion.tie_group|length }} livros. Realize o sorteio — apenas entre esses livros —
+    para definir quem segue para a votação final. A votação final fica bloqueada até isso ser resolvido.
+  </div>
+  <ul class="book-list">
+    {% for t in promotion.tie_group %}
+    <li class="book-row">
+      {% if t.book.thumbnail_url %}
+      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% else %}
+      <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title-row">
+          <span class="title">{{ t.book.title }}</span>
+          <span class="vote-badge">{{ t.votes }} voto{{ 's' if t.votes != 1 else '' }}</span>
+        </span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/admin/{{ poll.admin_token }}/draw-promotion"
+        onsubmit="return confirm('Realizar o sorteio de desempate agora, apenas entre os livros empatados listados acima? Essa ação não pode ser refeita.');">
+    <button type="submit">Realizar sorteio</button>
+  </form>
+</div>
+{% endif %}
+
 {% if round2_tally %}
 <div class="card">
   <h2>Apuração — votação final (única)</h2>

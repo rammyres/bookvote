@@ -12,6 +12,13 @@
 
   {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
 
+  {% if promotion and promotion.tie_group and not promotion.resolved %}
+  <p class="hint">
+    A 1ª votação terminou empatada para {{ promotion.slots_needed }} vaga{{ 's' if promotion.slots_needed != 1 else '' }}
+    restante{{ 's' if promotion.slots_needed != 1 else '' }} no top 3. A votação final abre assim que
+    o organizador realizar o sorteio de desempate.
+  </p>
+  {% else %}
   <div class="meta-row">
     <span>Votação final {{ 'encerrou' if read_only else 'encerra' }} em <strong data-utc="{{ poll.round2_end.isoformat() }}Z"></strong></span>
     {% if not read_only %}<span>faltam <span data-countdown="{{ poll.round2_end.isoformat() }}Z"></span></span>{% endif %}
@@ -75,6 +82,7 @@
 
     <button type="submit">Confirmar meu voto</button>
   </form>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

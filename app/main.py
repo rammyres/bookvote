@@ -957,12 +957,28 @@ def end_round2(admin_token: str, db: Session = Depends(get_db)):
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 
+@app.post("/admin/{admin_token}/draw-promotion")
+def trigger_promotion_draw(admin_token: str, db: Session = Depends(get_db)):
+    """Resolves a tie at the round-1 -> round-2 cutoff (top 3). Without
+    this, a poll that ends round 1 tied for the last finalist slot(s)
+    has no way to advance: round 2 stays permanently unresolved."""
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) not in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
+        raise HTTPException(400, "A 1ª votação ainda não terminou.")
+    promotion = pl.compute_round1_promotion(db, poll)
+    if not promotion.tie_group or promotion.resolved:
+        raise HTTPException(400, "Não há empate para sortear.")
+    pl.run_promotion_draw(db, poll, promotion.tie_group, promotion.slots_needed)
+    pl.finalize_round1_promotion(db, poll)
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
 @app.post("/admin/{admin_token}/draw")
 def trigger_draw(admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
     if pl.get_phase(poll) != pl.PHASE_CLOSED:
         raise HTTPException(400, "A 2ª votação ainda não terminou.")
-    pl.ensure_round1_promotion(db, poll)
+    pl.finalize_round1_promotion(db, poll)
     results = pl.compute_final_results(db, poll)
     if results.tie_group and not results.draw:
         pl.run_champion_draw(db, poll, results.tie_group)
@@ -978,7 +994,7 @@ def trigger_draw_json(admin_token: str, db: Session = Depends(get_db)):
     poll = get_poll_by_admin_token_or_404(db, admin_token)
     if pl.get_phase(poll) != pl.PHASE_CLOSED:
         raise HTTPException(400, "A 2ª votação ainda não terminou.")
-    pl.ensure_round1_promotion(db, poll)
+    pl.finalize_round1_promotion(db, poll)
     results = pl.compute_final_results(db, poll)
     if not results.tie_group:
         raise HTTPException(400, "Não há empate para sortear.")
