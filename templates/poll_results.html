@@ -52,7 +52,9 @@
 
   {% if results.draw %}
   <div class="draw-audit">
-    Sorteio de desempate — participantes (apenas os empatados em 1º): {{ results.draw.candidates_json }} · seed: {{ results.draw.seed }} · sorteado: {{ results.draw.winner_book_ids_json }}
+    Sorteio de desempate — participantes (apenas os empatados em 1º):
+{% for t in results.tie_group %}{{ t.book.title }}{% if not loop.last %}, {% endif %}{% endfor %}
+· sorteado: {{ results.champion.book.title if results.champion else '—' }} · seed: {{ results.draw.seed }}
   </div>
   {% endif %}
 
