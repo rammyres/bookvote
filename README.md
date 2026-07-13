@@ -1,101 +1,96 @@
+
 # Enquete de Livros
 
-Ferramenta pequena para clubes de leitura: indicação de livros → votação
-múltipla (1ª fase) → votação única entre os 3 finalistas (2ª fase) →
-campeão, com sorteio auditável em caso de empate. Feito em FastAPI + SQLite,
-sem contas de usuário.
+Ferramenta para clubes de leitura, com dois módulos independentes, sem
+contas de usuário. Feito em FastAPI + SQLite.
 
-## Como funciona
+- **Enquete**: indicação de livros → votação múltipla (1ª fase) → votação
+  única entre os finalistas (2ª fase) → campeão, com sorteio auditável em
+  caso de empate.
+- **Sorteio**: inscrição (nome + celular) durante um prazo → sorteio ao vivo
+  com contagem regressiva, leitura dos nomes em voz alta e animação de
+  roleta até revelar o(s) sorteado(s).
 
-- **Indicações**: qualquer pessoa com o link público sugere livros até o
-  horário definido pelo organizador. Em vez de campos separados de título,
-  autor e ISBN, a pessoa digita num único campo e a página sugere livros
-  em tempo real usando o Google Books (título, autor, ISBN e capa vêm
-  prontos ao clicar numa sugestão). Não achou o livro? Pode digitar
-  qualquer texto e indicar assim mesmo, sem capa. Cada pessoa tem um limite
-  configurável de indicações.
-- **Revisão (congelada)**: ao encerrar o prazo de indicações, a lista trava
-  automaticamente e a votação **não** começa sozinha — o organizador recebe
-  um e-mail avisando e precisa entrar no painel para revisar. Nessa fase
-  ainda dá pra recusar indicações (e reverter); só quando o organizador
-  clica em "Liberar para votação" (escolhendo o prazo da 1ª votação nesse
-  momento) é que ela realmente começa.
-- **Votação 1 (múltipla)**: a lista trava e todos os livros indicados entram
-  na enquete, exibidos com capa (quando disponível) + nome. Cada visitante
-  marca quantos livros quiser e pode voltar para trocar o voto até o prazo
-  acabar.
-- **Votação 2 (única)**: ao encerrar a votação 1, os 3 mais votados avançam
-  — se houver empate na 3ª vaga, **todos** os empatados avançam (pode virar
-  4, 5 finalistas, etc.). Nessa fase cada pessoa vota em só 1 livro entre os
-  finalistas.
-- **Resultado**: o mais votado na votação 2 é o campeão. Se houver empate em
-  1º lugar, o organizador aciona o sorteio pelo painel — uma animação de
-  roleta gira só entre os livros empatados e termina com um "selo" no
-  vencedor real — restrito aos livros empatados (nunca a lista inteira). O
-  sorteio fica registrado (candidatos + seed + sorteado) para qualquer
-  pessoa conferir na página pública. Sem JavaScript, o mesmo botão ainda
-  funciona (só sem a animação).
-- **Administração**: quem cria a enquete recebe um link secreto de admin
-  (`/admin/<token>`) para encerrar fases antes do prazo e acionar o sorteio.
-  Se informar um e-mail ao criar a enquete, esse link também chega por
-  e-mail (via Resend) — e pode ser reenviado a qualquer momento pela página
-  pública da enquete ("Perdeu o link de administração? Clique aqui"),
-  informando o mesmo e-mail.
-- **Página inicial**: mostra dois botões — "Criar nova enquete" e "Ver
-  votações em andamento" (lista todas as enquetes que ainda não encerraram,
-  visível para qualquer visitante, sem login — pense nisso se algum dia
-  hospedar grupos sem relação entre si na mesma instância).
-- **Links curtos**: o link público usa 8 caracteres (`/p/AbC123xy`) e o link
-  de admin usa 16 (`/admin/<token>`, ~95 bits de entropia — continua sendo
-  um segredo forte, só que mais fácil de copiar e colar do que um UUID).
+## Enquete
 
-> **Atenção se você já tinha uma versão anterior rodando**: o esquema do
-> banco mudou (a enquete agora tem 3 prazos — indicações, votação 1, votação
-> 2 — em vez de 2, e os votos guardam a qual rodada pertencem). Isso não é
-> compatível com um `bookvote.db` criado pela versão de uma única votação.
-> Como ainda está em fase de testes, o caminho mais simples é apagar o
-> volume antigo antes de subir a nova versão:
+- **Indicações**: qualquer pessoa com o link sugere livros até o prazo
+  definido. Busca em tempo real via Google Books (título, autor, ISBN e
+  capa vêm prontos); também dá pra digitar livre, sem capa. Limite
+  configurável de indicações por pessoa.
+- **Revisão (congelada)**: ao encerrar as indicações, a lista trava e a
+  votação **não** começa sozinha — o organizador recebe um e-mail e precisa
+  entrar no painel, revisar (pode recusar indicações e reverter) e clicar
+  em "Liberar para votação", escolhendo aí o prazo da 1ª votação.
+- **Votação 1 (múltipla)**: todo livro indicado entra na enquete; cada
+  visitante marca quantos quiser e pode trocar o voto até o prazo acabar.
+- **Corte para a votação 2**: por padrão avançam os 3 mais votados, e um
+  empate na última vaga é resolvido por sorteio (restrito só aos
+  empatados). Ao criar a enquete dá pra escolher a política alternativa
+  "todos os empatados avançam" — sem sorteio nesse corte, mas o top 3 pode
+  virar 4, 5 finalistas.
+- **Votação 2 (única)**: um voto por pessoa entre os finalistas.
+- **Resultado**: mais votado na votação 2 vence. Empate em 1º é sempre
+  resolvido por sorteio (nunca "todos avançam" — só pode haver um campeão),
+  com animação restrita aos livros empatados e registro auditável
+  (candidatos + seed + sorteado) na página pública.
+- **Administração**: link secreto de admin (`/admin/<token>`) para encerrar
+  fases antes do prazo e acionar sorteios. Se um e-mail for informado na
+  criação, o link também chega por lá (Resend) e pode ser reenviado a
+  qualquer momento pela página pública.
+
+> **Enquetes antigas**: o esquema já teve versões incompatíveis entre si
+> (3 prazos ao invés de 2, coluna de política de empate, etc.). Se você
+> vem de uma versão bem antiga e a aplicação não subir, o caminho mais
+> simples é apagar o volume e recriar:
+>
 > ```bash
 > docker compose down
 > docker volume rm bookvote_bookvote_data   # nome pode variar, veja `docker volume ls`
 > docker compose up -d --build
 > ```
 
-### Controle anti-bot (camadas, sem exigir conta)
+## Sorteio
 
-1. Cookie assinado identifica o navegador do votante.
-2. Cada IP só pode gerar um número limitado de "identidades" de votante por
-   enquete (`BOOKVOTE_MAX_VOTERS_PER_IP`, padrão 6) — dificulta o padrão
-   "limpar cookies e votar de novo" em escala.
-3. **Log de votos apenas com inserção** (append-only): nenhum voto é
-   apagado. Cada envio de cédula grava linhas novas e anula (sem excluir)
-   os votos anteriores dessa mesma pessoa (`voter_id`) **ou** desse mesmo
-   IP (`ip_hash`) naquela rodada — só a cédula mais recente por IP conta na
-   apuração. Isso cria um rastro auditável completo e fecha o brecha de
-   "várias identidades de votante, cada uma votando de verdade" dentro do
-   limite do item 2 acima.
-4. Captcha (Cloudflare Turnstile, gratuito) na indicação e no voto.
-5. Rate limiting por IP nas rotas de indicar/votar/criar enquete.
+- **Cadastro**: título, descrição, prazo de inscrição e quantos sorteados
+  (definido na criação, não muda depois — o sorteio escolhe essa
+  quantidade de uma vez só).
+- **Inscrição**: nome + celular, com captcha. Celular é a chave de
+  deduplicação (normalizado, sem formatação) — uma pessoa não entra duas
+  vezes na mesma rifa.
+- **Painel do organizador** (`/admin/raffle/<token>`): lista de inscritos,
+  botão para ler os nomes em voz alta (Web Speech API) e botão para
+  realizar o sorteio — contagem regressiva, rolete de nomes desacelerando
+  e anúncio falado do vencedor. O sorteio em si roda no servidor com RNG
+  criptográfico antes da animação começar; a animação é só a apresentação
+  em cima de um resultado já gravado e auditável (seed visível no painel).
+- Depende do navegador ter voz em pt-BR instalada para falar em voz alta;
+  sem isso a leitura visual/texto continua funcionando normalmente.
 
-> **Consequência importante do item 3**: se várias pessoas votam a partir
-> do mesmo IP (Wi-Fi de casa, escritório, evento), só o voto mais recente
-> daquele IP conta — os votos anteriores da mesma rede são anulados, mesmo
-> vindos de pessoas diferentes. É uma troca deliberada: prioriza dificultar
-> fraude sobre justiça em redes compartilhadas. Se isso for um problema
-> para o seu público (ex: evento presencial numa rede única), a proteção
-> mais forte de verdade é autenticação real — login por e-mail ou Telegram.
+## Controle anti-bot (sem exigir conta)
 
-Nenhuma camada isolada é perfeita, mas juntas encarecem bastante o abuso
-para uma ferramenta deste porte. Se precisar de algo mais forte no futuro,
-o próximo passo natural é login por e-mail (link único) ou Telegram.
+1. Cookie assinado identifica o navegador.
+2. Limite de identidades de votante por IP/enquete
+   (`BOOKVOTE_MAX_VOTERS_PER_IP`, padrão 6) e de inscrições por IP/sorteio
+   (`BOOKVOTE_MAX_RAFFLE_ENTRIES_PER_IP`, padrão 6).
+3. **Log de votos append-only**: nenhum voto é apagado — cada cédula nova
+   anula (sem excluir) os votos anteriores da mesma pessoa **ou** do mesmo
+   IP naquela rodada; só a mais recente por IP conta na apuração. Isso
+   significa que, num IP compartilhado (Wi-Fi de casa, evento), só o
+   último voto daquele IP conta — troca deliberada de justiça em rede
+   compartilhada por dificultar fraude. Pra público assim, autenticação
+   real (e-mail ou Telegram) seria a proteção de verdade.
+4. Captcha (Cloudflare Turnstile, gratuito) em indicação, voto e inscrição
+   de sorteio.
+5. Rate limiting por IP nas rotas de escrita.
 
-**Sobre e-mail (Resend)**: sem `RESEND_API_KEY`, tudo funciona normalmente
-— só não envia e-mail de link de administração. No plano gratuito do
-Resend, sem domínio verificado, o remetente de testes (`onboarding@resend.dev`)
-só entrega para o e-mail cadastrado na sua própria conta Resend — para
-enviar a qualquer participante, verifique um domínio em
-https://resend.com/domains e troque `RESEND_FROM_EMAIL` no `.env` (ou via
-`./scripts/setup_env.sh --resend-from "Nome <voce@seudominio.com>"`).
+Nenhuma camada é perfeita sozinha, mas juntas encarecem o abuso o
+suficiente para esse porte de ferramenta.
+
+**E-mail (Resend)**: sem `RESEND_API_KEY`, tudo funciona normalmente — só
+não envia e-mail de administração. No plano gratuito sem domínio
+verificado, o remetente de testes só entrega pro e-mail da sua própria
+conta Resend; para enviar a qualquer pessoa, verifique um domínio em
+https://resend.com/domains e troque `RESEND_FROM_EMAIL`.
 
 ## Rodar localmente
 
@@ -106,104 +101,86 @@ cp .env.example .env   # gere BOOKVOTE_SECRET_KEY como indicado no arquivo
 uvicorn app.main:app --reload
 ```
 
-Abra http://localhost:8000 — sem as chaves do Turnstile no `.env`, o captcha
-fica desativado automaticamente (bom para testar o fluxo). O `.env` é lido
-automaticamente tanto local (via `python-dotenv`) quanto no Docker (via
-`env_file`), então não precisa exportar nada manualmente — só editar o
-arquivo e reiniciar o `uvicorn`/container.
+Abra http://localhost:8000 — sem as chaves do Turnstile, o captcha fica
+desativado automaticamente. O `.env` é lido tanto local (`python-dotenv`)
+quanto no Docker (`env_file`), sem precisar exportar nada manualmente.
 
-**Sobre a busca de livros**: sem `GOOGLE_BOOKS_API_KEY`, as buscas usam a
-cota pública anônima do Google Books, que é bem pequena e some rápido com
-uso normal (aparecem como erro `429 Too Many Requests` no log). Isso não
-quebra a ferramenta — a indicação manual continua funcionando — mas para
-uso real vale configurar a chave (veja `.env.example`). Depois de editar o
-`.env`, confirme no log de inicialização se apareceu "API key carregada":
-sem isso, o `uvicorn --reload` às vezes não recarrega variáveis de ambiente
-entre reinícios do processo pai — se persistir, pare e rode `uvicorn`
-de novo (Ctrl+C e novo `uvicorn app.main:app --reload`).
+**Busca de livros**: sem `GOOGLE_BOOKS_API_KEY`, usa a cota pública
+anônima do Google Books (pequena, aparece como `429` no log sob uso
+normal — a indicação manual continua funcionando). Depois de editar o
+`.env`, confira no log se apareceu "API key carregada"; o `--reload` às
+vezes não pega variáveis de ambiente novas entre reinícios do processo
+pai — se persistir, pare e suba o `uvicorn` de novo.
 
 ## Deploy na Oracle Cloud (nginx já instalado na VM)
 
-Pressupondo uma instância Compute (Ubuntu) com nginx já rodando (servindo
-outros sites) e portas 80/443 liberadas na Security List/NSG do VCN e no
-firewall da própria instância.
+Pressupondo uma instância Compute (Ubuntu) com nginx já rodando e portas
+80/443 liberadas na Security List/NSG do VCN e no firewall da instância.
 
-1. **Envie os arquivos para a VM** (do seu computador):
-   ```bash
-   scp -r bookvote/ ubuntu@SEU_IP:~/bookvote
-   ```
+1. **Envie os arquivos**: `scp -r bookvote/ ubuntu@SEU_IP:~/bookvote`
+2. **Instale Docker** (se não tiver):
 
-2. **Na VM, instale Docker e Compose** (se ainda não tiver):
    ```bash
    sudo apt update && sudo apt install -y docker.io docker-compose-plugin
    sudo usermod -aG docker $USER && newgrp docker
    ```
+3. **Confirme as portas 80/443** liberadas (provavelmente já estão, já que
+   o nginx roda outros sites).
+4. **Configure o `.env`** (gera a chave secreta automaticamente):
 
-3. **Confirme que as portas 80/443 já estão liberadas** (Security List/NSG
-   do VCN de `0.0.0.0/0`, e no firewall local se você usa algo além do
-   nginx). Como o nginx já está instalado, provavelmente isso já está feito.
-
-4. **Configure o `.env` com o script de setup** (gera a chave secreta
-   automaticamente):
    ```bash
    cd ~/bookvote
    ./scripts/setup_env.sh
    ```
-   Ele pergunta as chaves do Turnstile (crie gratuitamente em
-   https://dash.cloudflare.com/ → Turnstile — pode deixar em branco para
-   testar sem captcha), a chave do Google Books (opcional) e o limite de
-   votantes por IP.
 
-   Para deploy automatizado (sem prompts):
+   Pergunta as chaves do Turnstile (https://dash.cloudflare.com/ →
+   Turnstile — pode deixar em branco pra testar sem captcha), Google Books
+   e Resend (opcionais) e o limite de votantes por IP.
+
+   Não-interativo:
+
    ```bash
    ./scripts/setup_env.sh --yes \
      --turnstile-site SEU_SITE_KEY --turnstile-secret SEU_SECRET_KEY \
      --max-voters 8 --google-books-key SUA_CHAVE
    ```
-   Rodar de novo depois não perde a chave secreta já gerada — ele faz
-   backup do `.env` anterior e só atualiza o que você passar.
 
-5. **Suba o container** (só a aplicação — sem proxy próprio; o container
-   fica acessível apenas em `127.0.0.1:8000`, nunca direto pela internet):
+   Rodar de novo não perde a chave secreta já gerada — faz backup do
+   `.env` anterior e só atualiza o que for passado.
+5. **Suba o container** (só a app, sem proxy próprio — fica só em
+   `127.0.0.1:8000`, nunca exposto direto):
+
    ```bash
    docker compose up -d --build
    ```
+6. **Aponte o nginx**:
 
-6. **Aponte o nginx para o container**: copie `deploy/nginx-bookvote.conf`
-   para `/etc/nginx/sites-available/bookvote`, troque `server_name` pelo
-   seu domínio/subdomínio, e ative:
    ```bash
    sudo cp deploy/nginx-bookvote.conf /etc/nginx/sites-available/bookvote
    sudo nano /etc/nginx/sites-available/bookvote   # ajuste o server_name
    sudo ln -s /etc/nginx/sites-available/bookvote /etc/nginx/sites-enabled/
    sudo nginx -t && sudo systemctl reload nginx
    ```
+7. **HTTPS** (se já usa certbot na VM, detecta o server block novo):
 
-7. **HTTPS**: se você já usa certbot nessa VM para outros sites, é só rodar
-   (ele detecta o server block novo e adiciona TLS automaticamente):
    ```bash
    sudo certbot --nginx -d enquete.seudominio.com.br
    ```
-
-8. Acesse `https://enquete.seudominio.com.br`, crie sua primeira enquete e
-   guarde o link de admin que aparece após a criação.
+8. Acesse `https://enquete.seudominio.com.br` e crie a primeira enquete ou
+   sorteio — guarde o link de admin exibido na criação.
 
 > **Por que confiar em `X-Forwarded-For`**: o app usa esse cabeçalho para
-> identificar IPs (limite de votantes por rede, rate limiting). O
-> `docker-compose.yml` publica o container só em `127.0.0.1` — inacessível
-> de fora da própria VM — e o `Dockerfile` roda o uvicorn com
-> `--proxy-headers --forwarded-allow-ips='*'`, ou seja, ele confia no
-> `X-Forwarded-For` de qualquer coisa que se conecte à porta 8000. Isso só
-> é seguro porque, pela topologia de rede, a única coisa que consegue se
-> conectar ali é um processo no próprio host (o nginx) — ninguém de fora
-> alcança o container direto. O `deploy/nginx-bookvote.conf` já envia esse
-> cabeçalho corretamente; se você usar outro proxy no lugar do nginx,
+> identificar IPs (limites por rede, rate limiting). O `docker-compose.yml`
+> publica o container só em `127.0.0.1`, e o `Dockerfile` roda o uvicorn
+> com `--proxy-headers --forwarded-allow-ips='*'` — seguro porque, pela
+> topologia de rede, só o nginx do próprio host alcança a porta 8000. O
+> `deploy/nginx-bookvote.conf` já envia esse cabeçalho; usando outro proxy,
 > confirme que ele também envia `X-Forwarded-For` e `X-Forwarded-Proto`.
 
 ### Backup
 
-Os dados ficam no volume Docker `bookvote_data` (arquivo SQLite). Para
-copiar:
+Dados ficam no volume Docker `bookvote_data` (SQLite):
+
 ```bash
 docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
   cp /data/bookvote.db /backup/bookvote-backup.db

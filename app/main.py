@@ -21,8 +21,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from .database import Base, SessionLocal, engine, get_db, ensure_column
-from .models import Book, Poll, Vote, VoterIdentity, gen_short_id
+from .models import Book, Poll, Vote, VoterIdentity, Raffle, RaffleEntry, gen_short_id
 from . import poll_logic as pl
+from . import raffle_logic as rl
 from .book_search import search_books
 from .email_sender import send_email
 from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SITE_KEY, CAPTCHA_ENABLED
@@ -153,12 +154,56 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 MAX_VOTER_IDENTITIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_VOTERS_PER_IP", "6"))
+MAX_RAFFLE_ENTRIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_RAFFLE_ENTRIES_PER_IP", "6"))
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_DIGITS_RE = re.compile(r"\D+")
 
 
 def is_valid_email(value: str) -> bool:
     return bool(_EMAIL_RE.match(value.strip()))
+
+
+def normalize_phone(value: str) -> str:
+    """Strips everything but digits, so '(11) 91234-5678' and
+    '11912345678' de-duplicate to the same raffle entry."""
+    return _PHONE_DIGITS_RE.sub("", value or "")
+
+
+def format_phone_display(value: str) -> str:
+    """'11999998888' -> '(11) 99999-8888' (or 4-digit local part for
+    landlines). Falls back to the raw value if it doesn't look like a
+    BR phone, rather than mangling something unexpected."""
+    d = normalize_phone(value)
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return value
+
+
+def mask_phone_display(value: str) -> str:
+    """Same as format_phone_display, but with everything between the
+    area code and the last 4 digits replaced by *, for showing on the
+    public signup page without exposing full numbers."""
+    d = normalize_phone(value)
+    if len(d) < 6:
+        return format_phone_display(value)
+    ddd, rest = d[:2], d[2:]
+    last4 = rest[-4:]
+    middle = rest[:-4]
+    return f"({ddd}) {'*' * len(middle)}-{last4}"
+
+
+def whatsapp_link(value: str) -> str:
+    """wa.me deep link to start a chat — assumes BR numbers (+55), same
+    as the rest of this app."""
+    return f"https://wa.me/55{normalize_phone(value)}"
+
+
+templates.env.filters["format_phone"] = format_phone_display
+templates.env.filters["mask_phone"] = mask_phone_display
+templates.env.filters["whatsapp_link"] = whatsapp_link
 
 
 def parse_local_datetime(value: str, tz_offset_minutes: int) -> datetime:
@@ -203,6 +248,20 @@ def get_poll_by_admin_token_or_404(db: Session, admin_token: str) -> Poll:
     if not poll:
         raise HTTPException(status_code=404, detail="Enquete não encontrada")
     return poll
+
+
+def get_raffle_or_404(db: Session, raffle_id: str) -> Raffle:
+    raffle = db.query(Raffle).filter(Raffle.id == raffle_id).first()
+    if not raffle:
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado")
+    return raffle
+
+
+def get_raffle_by_admin_token_or_404(db: Session, admin_token: str) -> Raffle:
+    raffle = db.query(Raffle).filter(Raffle.admin_token == admin_token).first()
+    if not raffle:
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado")
+    return raffle
 
 
 def carry_cookie(source: Response, target):
@@ -369,6 +428,225 @@ def new_poll_form(request: Request):
     return templates.TemplateResponse("new_poll.html", {"request": request})
 
 
+RAFFLE_PHASE_LABELS = {
+    rl.PHASE_SIGNUP: "Inscrições abertas",
+    rl.PHASE_READY: "Aguardando sorteio",
+    rl.PHASE_DONE: "Sorteio realizado",
+}
+
+
+@app.get("/raffles", response_class=HTMLResponse)
+def list_raffles(request: Request, status: str = "open", db: Session = Depends(get_db)):
+    status = status if status in ("open", "closed") else "open"
+    all_raffles = db.query(Raffle).order_by(Raffle.created_at.desc()).all()
+    tagged = [(r, rl.get_phase(r)) for r in all_raffles]
+    if status == "closed":
+        tagged = [(r, phase) for r, phase in tagged if phase == rl.PHASE_DONE]
+    else:
+        tagged = [(r, phase) for r, phase in tagged if phase != rl.PHASE_DONE]
+    return templates.TemplateResponse(
+        "raffle_list.html",
+        {"request": request, "raffles": tagged, "status": status, "phase_labels": RAFFLE_PHASE_LABELS},
+    )
+
+
+@app.get("/raffles/new", response_class=HTMLResponse)
+def new_raffle_form(request: Request):
+    return templates.TemplateResponse("new_raffle.html", {"request": request})
+
+
+@app.post("/raffles")
+@limiter.limit("5/minute")
+async def create_raffle(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    signup_end_local: str = Form(...),
+    tz_offset: int = Form(0),
+    winners_count: int = Form(1),
+    admin_email: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    signup_end = parse_local_datetime(signup_end_local, tz_offset)
+    if signup_end <= pl.now():
+        raise HTTPException(400, "O fim das inscrições precisa ser no futuro.")
+    if winners_count < 1 or winners_count > 100:
+        raise HTTPException(400, "Número de sorteados inválido.")
+
+    admin_email_clean = admin_email.strip()
+    if admin_email_clean and not is_valid_email(admin_email_clean):
+        raise HTTPException(400, "E-mail inválido.")
+
+    raffle = None
+    for _ in range(5):
+        candidate = Raffle(
+            id=gen_short_id(8),
+            admin_token=gen_short_id(16),
+            title=title.strip(),
+            description=description.strip(),
+            signup_end=signup_end,
+            winners_count=winners_count,
+            admin_email=admin_email_clean or None,
+        )
+        db.add(candidate)
+        try:
+            db.commit()
+            raffle = candidate
+            break
+        except IntegrityError:
+            db.rollback()
+    if raffle is None:
+        raise HTTPException(500, "Não foi possível gerar um link único. Tente novamente.")
+    db.refresh(raffle)
+
+    if raffle.admin_email:
+        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/raffle/{raffle.admin_token}"
+        public_url = f"{request.url.scheme}://{request.url.netloc}/r/{raffle.id}"
+        await send_email(
+            to=raffle.admin_email,
+            subject=f"Seu sorteio: {raffle.title}",
+            html=(
+                f"<p>Sorteio criado! Link para inscrição: <a href=\"{public_url}\">{public_url}</a></p>"
+                f"<p>Link de administração (guarde-o — só você recebeu este link): "
+                f"<a href=\"{admin_url}\">{admin_url}</a></p>"
+            ),
+        )
+
+    return RedirectResponse(url=f"/admin/raffle/{raffle.admin_token}", status_code=303)
+
+
+RAFFLE_ERROR_MESSAGES = {
+    "captcha": "Falha na verificação anti-robô. Tente novamente.",
+    "duplicate_phone": "Esse número de celular já está inscrito neste sorteio.",
+    "phase_ended": "As inscrições já foram encerradas.",
+    "too_many_entries": "Muitas inscrições distintas a partir desta rede. Fale com o organizador.",
+    "invalid_phone": "Celular inválido — informe DDD + número.",
+}
+
+
+@app.get("/r/{raffle_id}", response_class=HTMLResponse)
+def view_raffle(request: Request, raffle_id: str, db: Session = Depends(get_db)):
+    raffle = get_raffle_or_404(db, raffle_id)
+    phase = rl.get_phase(raffle)
+    result = rl.get_result(db, raffle)
+    error = request.query_params.get("error")
+    return templates.TemplateResponse(
+        "raffle_view.html",
+        {
+            "request": request,
+            "raffle": raffle,
+            "phase": phase,
+            "entry_count": len(result.entries),
+            "result": result,
+            "form_error": RAFFLE_ERROR_MESSAGES.get(error),
+            "captcha_enabled": CAPTCHA_ENABLED,
+            "turnstile_site_key": TURNSTILE_SITE_KEY,
+            "show_recovery": True,
+            "recovery_action": f"/r/{raffle.id}/resend-admin-link",
+            "recovery_noun": "o sorteio",
+        },
+    )
+
+
+@app.post("/r/{raffle_id}/resend-admin-link")
+@limiter.limit("3/hour")
+async def raffle_resend_admin_link(
+    request: Request, raffle_id: str, email: str = Form(...), db: Session = Depends(get_db)
+):
+    raffle = get_raffle_or_404(db, raffle_id)
+    email_norm = email.strip().lower()
+
+    if raffle.admin_email and raffle.admin_email.strip().lower() == email_norm:
+        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/raffle/{raffle.admin_token}"
+        await send_email(
+            to=raffle.admin_email,
+            subject=f"Link de administração — {raffle.title}",
+            html=(
+                f"<p>Você pediu para recuperar o link de administração do sorteio "
+                f"<strong>{raffle.title}</strong>:</p>"
+                f'<p><a href="{admin_url}">{admin_url}</a></p>'
+                f"<p>Guarde esse link com cuidado — quem o tiver administra o sorteio.</p>"
+            ),
+        )
+
+    # Same response whether or not the email matched, so this endpoint can't
+    # be used to probe which address (if any) is registered on a raffle.
+    return RedirectResponse(url=f"/r/{raffle_id}?resend=1", status_code=303)
+
+
+@app.post("/r/{raffle_id}/signup")
+@limiter.limit("10/minute")
+async def raffle_signup(
+    request: Request,
+    raffle_id: str,
+    name: str = Form(...),
+    phone: str = Form(...),
+    cf_turnstile_response: str = Form(default="", alias="cf-turnstile-response"),
+    db: Session = Depends(get_db),
+):
+    raffle = get_raffle_or_404(db, raffle_id)
+    if rl.get_phase(raffle) != rl.PHASE_SIGNUP:
+        return RedirectResponse(url=f"/r/{raffle_id}?error=phase_ended", status_code=303)
+
+    if not await verify_captcha(cf_turnstile_response, request):
+        return RedirectResponse(url=f"/r/{raffle_id}?error=captcha", status_code=303)
+
+    name_clean = name.strip()[:120]
+    phone_clean = normalize_phone(phone)
+    if not name_clean or len(phone_clean) < 10:
+        return RedirectResponse(url=f"/r/{raffle_id}?error=invalid_phone", status_code=303)
+
+    ip_h = hash_ip(request, raffle.id)
+    ip_count = db.query(RaffleEntry).filter_by(raffle_id=raffle.id, ip_hash=ip_h).count()
+    if ip_count >= MAX_RAFFLE_ENTRIES_PER_IP:
+        return RedirectResponse(url=f"/r/{raffle_id}?error=too_many_entries", status_code=303)
+
+    db.add(RaffleEntry(raffle_id=raffle.id, name=name_clean, phone=phone_clean, ip_hash=ip_h))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse(url=f"/r/{raffle_id}?error=duplicate_phone", status_code=303)
+
+    return RedirectResponse(url=f"/r/{raffle_id}?signed_up=1", status_code=303)
+
+
+@app.get("/admin/raffle/{admin_token}", response_class=HTMLResponse)
+def raffle_admin_dashboard(request: Request, admin_token: str, db: Session = Depends(get_db)):
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    return templates.TemplateResponse(
+        "raffle_admin.html",
+        {
+            "request": request,
+            "raffle": raffle,
+            "phase": rl.get_phase(raffle),
+            "result": rl.get_result(db, raffle),
+        },
+    )
+
+
+@app.post("/admin/raffle/{admin_token}/draw")
+def trigger_raffle_draw(admin_token: str, db: Session = Depends(get_db)):
+    """Runs the draw server-side (the only part that actually needs to be
+    trustworthy/random) and hands back winner + entrant names as JSON —
+    the admin dashboard's JS uses this to drive the countdown/reel
+    animation, but the random pick itself already happened by the time
+    this responds."""
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    if rl.get_phase(raffle) != rl.PHASE_READY:
+        raise HTTPException(400, "As inscrições ainda estão abertas, ou o sorteio já foi realizado.")
+    try:
+        rl.run_raffle_draw(db, raffle)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    result = rl.get_result(db, raffle)
+    return JSONResponse({
+        "winners": [{"id": e.id, "name": e.name} for e in result.winners],
+        "entries": [{"id": e.id, "name": e.name} for e in result.entries],
+    })
+
+
 @app.get("/polls", response_class=HTMLResponse)
 def list_polls(request: Request, status: str = "open", db: Session = Depends(get_db)):
     status = status if status in ("open", "closed") else "open"
@@ -504,6 +782,8 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
         "captcha_enabled": CAPTCHA_ENABLED,
         "turnstile_site_key": TURNSTILE_SITE_KEY,
         "show_recovery": True,
+        "recovery_action": f"/p/{poll.id}/resend-admin-link",
+        "recovery_noun": "a enquete",
         "form_error": FORM_ERROR_MESSAGES.get(request.query_params.get("error")),
     }
 

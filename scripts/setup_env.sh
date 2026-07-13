@@ -68,6 +68,27 @@ ask() {
   echo "${var:-$default}"
 }
 
+# Reads KEY=VALUE out of a .env file as plain text (grep + string slicing) —
+# deliberately NOT `source`, since that executes the file as a bash script.
+# A value with shell-special characters (spaces, <, >, $, `...`) would
+# otherwise break parsing, or worse, run something. This also means an
+# old .env corrupted by that very bug can still be read back safely,
+# instead of crashing this script before it gets a chance to fix it.
+get_env_value() {
+  local key="$1" file="$2" line val
+  [[ -f "$file" ]] || return
+  line="$(grep -m1 "^${key}=" "$file" 2>/dev/null || true)"
+  [[ -z "$line" ]] && return
+  val="${line#*=}"
+  if [[ "${val:0:1}" == "'" && "${val: -1}" == "'" && "${#val}" -ge 2 ]]; then
+    val="${val:1:-1}"
+    val="${val//\'\\\'\'/\'}"
+  elif [[ "${val:0:1}" == '"' && "${val: -1}" == '"' && "${#val}" -ge 2 ]]; then
+    val="${val:1:-1}"
+  fi
+  printf '%s' "$val"
+}
+
 # --- carrega valores existentes do .env, se houver, para não perder nada ---
 EXISTING_SECRET=""
 EXISTING_TS_SITE=""
@@ -79,18 +100,17 @@ EXISTING_RESEND_KEY=""
 EXISTING_RESEND_FROM="Enquete de Livros <onboarding@resend.dev>"
 
 if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck disable=SC1090
-  set -a
-  source "$ENV_FILE"
-  set +a
-  EXISTING_SECRET="${BOOKVOTE_SECRET_KEY:-}"
-  EXISTING_TS_SITE="${TURNSTILE_SITE_KEY:-}"
-  EXISTING_TS_SECRET="${TURNSTILE_SECRET_KEY:-}"
-  EXISTING_MAX_VOTERS="${BOOKVOTE_MAX_VOTERS_PER_IP:-6}"
-  EXISTING_COOKIE_SECURE="${BOOKVOTE_COOKIE_SECURE:-true}"
-  EXISTING_GOOGLE_BOOKS_KEY="${GOOGLE_BOOKS_API_KEY:-}"
-  EXISTING_RESEND_KEY="${RESEND_API_KEY:-}"
-  EXISTING_RESEND_FROM="${RESEND_FROM_EMAIL:-Enquete de Livros <onboarding@resend.dev>}"
+  EXISTING_SECRET="$(get_env_value BOOKVOTE_SECRET_KEY "$ENV_FILE")"
+  EXISTING_TS_SITE="$(get_env_value TURNSTILE_SITE_KEY "$ENV_FILE")"
+  EXISTING_TS_SECRET="$(get_env_value TURNSTILE_SECRET_KEY "$ENV_FILE")"
+  EXISTING_MAX_VOTERS="$(get_env_value BOOKVOTE_MAX_VOTERS_PER_IP "$ENV_FILE")"
+  EXISTING_MAX_VOTERS="${EXISTING_MAX_VOTERS:-6}"
+  EXISTING_COOKIE_SECURE="$(get_env_value BOOKVOTE_COOKIE_SECURE "$ENV_FILE")"
+  EXISTING_COOKIE_SECURE="${EXISTING_COOKIE_SECURE:-true}"
+  EXISTING_GOOGLE_BOOKS_KEY="$(get_env_value GOOGLE_BOOKS_API_KEY "$ENV_FILE")"
+  EXISTING_RESEND_KEY="$(get_env_value RESEND_API_KEY "$ENV_FILE")"
+  val="$(get_env_value RESEND_FROM_EMAIL "$ENV_FILE")"
+  EXISTING_RESEND_FROM="${val:-Enquete de Livros <onboarding@resend.dev>}"
   cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%s)"
   echo "Backup do .env anterior salvo em $ENV_FILE.bak.<timestamp>"
 fi
@@ -122,15 +142,25 @@ fi
 if [[ -z "$COOKIE_SECURE" ]]; then
   COOKIE_SECURE="$(ask "Exigir HTTPS para o cookie de votante (true/false)" "$EXISTING_COOKIE_SECURE")"
 fi
+esc() {
+  # Single-quotes the value for .env: since this file gets `source`d by
+  # this very script on its next run (to preserve existing settings),
+  # every value needs to survive being parsed as shell. Single quotes
+  # block all expansion ($, `, \, "...), so this is safe even for things
+  # like the default RESEND_FROM_EMAIL, which contains spaces and <>.
+  # Embedded single quotes are escaped with the classic '\'' trick.
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 cat > "$ENV_FILE" <<EOF
-BOOKVOTE_SECRET_KEY=$SECRET_KEY
-TURNSTILE_SITE_KEY=$TURNSTILE_SITE
-TURNSTILE_SECRET_KEY=$TURNSTILE_SECRET
-BOOKVOTE_COOKIE_SECURE=$COOKIE_SECURE
-BOOKVOTE_MAX_VOTERS_PER_IP=$MAX_VOTERS
-GOOGLE_BOOKS_API_KEY=$GOOGLE_BOOKS_KEY
-RESEND_API_KEY=$RESEND_KEY
-RESEND_FROM_EMAIL=$RESEND_FROM
+BOOKVOTE_SECRET_KEY=$(esc "$SECRET_KEY")
+TURNSTILE_SITE_KEY=$(esc "$TURNSTILE_SITE")
+TURNSTILE_SECRET_KEY=$(esc "$TURNSTILE_SECRET")
+BOOKVOTE_COOKIE_SECURE=$(esc "$COOKIE_SECURE")
+BOOKVOTE_MAX_VOTERS_PER_IP=$(esc "$MAX_VOTERS")
+GOOGLE_BOOKS_API_KEY=$(esc "$GOOGLE_BOOKS_KEY")
+RESEND_API_KEY=$(esc "$RESEND_KEY")
+RESEND_FROM_EMAIL=$(esc "$RESEND_FROM")
 EOF
 
 chmod 600 "$ENV_FILE"

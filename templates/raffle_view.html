@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ raffle.title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ raffle.title }}</h1>
+  {% if raffle.description %}<p class="poll-desc">{{ raffle.description }}</p>{% endif %}
+
+  {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
+  {% if request.query_params.get('signed_up') == '1' %}
+  <div class="hint">Inscrição confirmada! Boa sorte 🍀</div>
+  {% endif %}
+
+  {% if phase == "signup" %}
+  <p class="hint">Inscrições encerram em <span data-countdown="{{ raffle.signup_end.isoformat() }}Z"></span>
+    (<span data-utc="{{ raffle.signup_end.isoformat() }}Z"></span>).</p>
+  <p class="hint">{{ entry_count }} pessoa{{ 's' if entry_count != 1 else '' }} já inscrita{{ 's' if entry_count != 1 else '' }}.</p>
+
+  <form method="post" action="/r/{{ raffle.id }}/signup">
+    <label for="name">Nome</label>
+    <input type="text" id="name" name="name" required maxlength="120" placeholder="Seu nome">
+
+    <label for="phone">Celular</label>
+    <input type="tel" id="phone" name="phone" required placeholder="(99) 99999-9999" inputmode="numeric">
+
+    {% if captcha_enabled %}
+    <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" style="margin-top:1.25rem;"></div>
+    {% endif %}
+
+    <button type="submit">Inscrever-se</button>
+  </form>
+
+  {% elif phase == "ready" %}
+  <p class="hint">Inscrições encerradas — {{ entry_count }} pessoa{{ 's' if entry_count != 1 else '' }} inscrita{{ 's' if entry_count != 1 else '' }}. Aguardando o organizador realizar o sorteio.</p>
+
+  {% elif phase == "done" %}
+  <h2>🎉 Sorteado{{ 's' if result.winners|length != 1 else '' }}</h2>
+  <ul class="book-list">
+    {% for w in result.winners %}
+    <li class="book-row"><span class="title">{{ w.name }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
+{% if result.entries %}
+<div class="card">
+  <h2>Inscritos ({{ result.entries|length }})</h2>
+  <ul class="book-list">
+    {% for e in result.entries %}
+    <li class="book-row">
+      <span class="title">{{ e.name }}</span>
+      <span class="hint">{{ e.phone|mask_phone }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<script>
+  (function () {
+    var phone = document.getElementById('phone');
+    if (!phone) return;
+    phone.addEventListener('input', function () {
+      var d = phone.value.replace(/\D/g, '').slice(0, 11);
+      var out = d;
+      if (d.length > 2) out = '(' + d.slice(0, 2) + ') ' + d.slice(2);
+      if (d.length > 7) out = '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+      phone.value = out;
+    });
+  })();
+</script>
+{% endblock %}

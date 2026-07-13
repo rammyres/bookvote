@@ -617,3 +617,46 @@ button:hover { opacity: 0.9; }
 @keyframes fade-in {
   to { opacity: 1; }
 }
+
+/* --- raffle draw reveal (countdown + slot-machine reel) --- */
+.draw-countdown {
+  font-family: var(--font-mono);
+  font-size: 4rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--stamp);
+  margin: 1.5rem 0;
+}
+.draw-countdown.draw-pulse { animation: draw-pulse 0.8s ease-out; }
+@keyframes draw-pulse {
+  0% { transform: scale(1.6); opacity: 0.2; }
+  60% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.draw-reel {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 1.5rem 1rem;
+  margin: 1rem 0;
+  border: 2px dashed var(--line);
+  border-radius: 6px;
+  background: #fbf7ec;
+  min-height: 1.6em;
+  color: var(--text-on-paper);
+  transition: opacity 0.05s linear;
+}
+.draw-reel-flip { opacity: 0.55; }
+.draw-reel-winner {
+  opacity: 1;
+  color: var(--stamp);
+  border-style: solid;
+  animation: draw-winner-pop 0.5s ease-out;
+}
+@keyframes draw-winner-pop {
+  0% { transform: scale(0.85); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}

@@ -23,8 +23,8 @@
     {% if show_recovery %}
     <div class="card recovery-card">
       <p class="hint"><a href="#" id="recovery-toggle">É o organizador e perdeu o link de administração? Clique aqui.</a></p>
-      <form method="post" action="/p/{{ poll.id }}/resend-admin-link" id="recovery-form" hidden>
-        <label for="recovery-email">E-mail usado ao criar a enquete</label>
+      <form method="post" action="{{ recovery_action }}" id="recovery-form" hidden>
+        <label for="recovery-email">E-mail usado ao criar {{ recovery_noun or "a enquete" }}</label>
         <input type="email" id="recovery-email" name="email" required placeholder="seu@email.com">
         <button type="submit" class="secondary">Enviar link de administração por e-mail</button>
       </form>

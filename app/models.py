@@ -179,3 +179,69 @@ class DrawLog(Base):
     created_at = Column(DateTime, default=utcnow)
 
     poll = relationship("Poll", back_populates="draws")
+
+
+class Raffle(Base):
+    """A standalone giveaway: open signup (name + phone) for a period,
+    then the admin runs a single draw for a chosen number of winners.
+    Independent of Poll — no nomination/voting involved."""
+
+    __tablename__ = "raffles"
+
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
+    admin_token = Column(
+        String, unique=True, default=lambda: gen_short_id(16), nullable=False, index=True
+    )
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    admin_email = Column(String, nullable=True)
+
+    signup_end = Column(DateTime, nullable=False)
+    # chosen once, at creation — the draw always picks exactly this many
+    # winners (or every entrant, if fewer signed up) in a single event
+    winners_count = Column(Integer, default=1, nullable=False)
+
+    # set once the draw has run — see raffle_logic.get_phase
+    drawn = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=utcnow)
+
+    entries = relationship("RaffleEntry", back_populates="raffle", cascade="all, delete-orphan")
+    draws = relationship("RaffleDraw", back_populates="raffle", cascade="all, delete-orphan")
+
+
+class RaffleEntry(Base):
+    """One signup = one person entered for the prize(s). `phone` is
+    normalized to digits only and is the de-duplication key — for a
+    real-world giveaway, a phone number identifies a person more
+    reliably than a browser cookie."""
+
+    __tablename__ = "raffle_entries"
+    __table_args__ = (
+        UniqueConstraint("raffle_id", "phone", name="uq_raffle_entry_phone"),
+    )
+
+    id = Column(String, primary_key=True, default=gen_id)
+    raffle_id = Column(String, ForeignKey("raffles.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    phone = Column(String, nullable=False)
+    ip_hash = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    raffle = relationship("Raffle", back_populates="entries")
+
+
+class RaffleDraw(Base):
+    """Audit trail for the raffle's draw — same shape/purpose as DrawLog,
+    kept separate since it references raffle_entries, not books."""
+
+    __tablename__ = "raffle_draws"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    raffle_id = Column(String, ForeignKey("raffles.id"), nullable=False, index=True)
+    candidates_json = Column(Text, nullable=False)
+    seed = Column(String, nullable=False)
+    winner_entry_ids_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+    raffle = relationship("Raffle", back_populates="draws")

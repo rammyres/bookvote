@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sorteios encerrados" if status == "closed" else "Sorteios em andamento" }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="hint"><a href="/">← Voltar</a></p>
+  <h1>{{ "Sorteios encerrados" if status == "closed" else "Sorteios em andamento" }}</h1>
+
+  <p class="hint">
+    {% if status == "closed" %}
+    <a href="/raffles">Ver sorteios em andamento</a>
+    {% else %}
+    <a href="/raffles?status=closed">Ver sorteios encerrados</a>
+    {% endif %}
+  </p>
+
+  {% if raffles %}
+  <ul class="book-list">
+    {% for raffle, phase in raffles %}
+    <li class="book-row">
+      <div class="book-row-text">
+        <a href="/r/{{ raffle.id }}" class="title" style="text-decoration:underline;">{{ raffle.title }}</a>
+        <span class="isbn" style="float:right;">{{ phase_labels[phase] }}</span>
+        {% if raffle.description %}<br><span class="author">{{ raffle.description }}</span>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">{{ "Nenhum sorteio encerrado ainda." if status == "closed" else "Nenhum sorteio em andamento agora." }}</p>
+  {% endif %}
+
+  <a class="btn secondary" href="/raffles/new" style="margin-top:1.5rem;">Criar novo sorteio</a>
+</div>
+{% endblock %}

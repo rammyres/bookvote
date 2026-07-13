@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Criar sorteio{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="hint"><a href="/">← Voltar</a></p>
+  <h1>Criar um sorteio</h1>
+  <p class="poll-desc">Inscrição aberta por um período (nome + celular). Quando encerrar, você entra no painel de administração e realiza o sorteio, com contagem regressiva e leitura dos nomes em voz alta.</p>
+
+  <form method="post" action="/raffles">
+    <label for="title">Título do sorteio</label>
+    <input type="text" id="title" name="title" required placeholder="Ex: Sorteio de julho — Duna">
+
+    <label for="description">Descrição (opcional)</label>
+    <textarea id="description" name="description" rows="3" placeholder="O que está sendo sorteado, regras, etc."></textarea>
+
+    <label for="signup_end_local">Inscrições encerram em</label>
+    <input type="datetime-local" id="signup_end_local" name="signup_end_local" required>
+    <p class="hint">Até esse momento, qualquer pessoa com o link pode se inscrever com nome e celular.</p>
+
+    <label for="winners_count">Quantos sorteados</label>
+    <input type="number" id="winners_count" name="winners_count" value="1" min="1" max="100">
+    <p class="hint">Definido agora e não muda depois — o sorteio escolhe essa quantidade de uma vez só, no dia.</p>
+
+    <label for="admin_email">Seu e-mail (opcional)</label>
+    <input type="email" id="admin_email" name="admin_email" placeholder="seu@email.com">
+    <p class="hint">Enviamos o link de administração pra esse e-mail — é o único jeito de acessar o painel do sorteio depois.</p>
+
+    <input type="hidden" name="tz_offset" value="0">
+    <button type="submit">Criar sorteio</button>
+  </form>
+</div>
+{% endblock %}

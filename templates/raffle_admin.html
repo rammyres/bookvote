@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Admin — {{ raffle.title }}{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="hint"><a href="/r/{{ raffle.id }}" target="_blank">Ver página pública ↗</a></p>
+  <h1>{{ raffle.title }}</h1>
+  {% if raffle.description %}<p class="poll-desc">{{ raffle.description }}</p>{% endif %}
+  <p class="hint">
+    Inscrições encerram em <span data-utc="{{ raffle.signup_end.isoformat() }}Z"></span>
+    · {{ raffle.winners_count }} sorteado{{ 's' if raffle.winners_count != 1 else '' }}
+  </p>
+</div>
+
+<div class="card">
+  <h2>Inscritos ({{ result.entries|length }})</h2>
+  {% if result.entries %}
+  <div class="tts-controls" id="tts-controls" hidden>
+    <label for="rate-input">Velocidade da leitura: <span id="rate-value">1.0x</span></label>
+    <input type="range" id="rate-input" min="0.5" max="2" step="0.1" value="1">
+  </div>
+  <button type="button" id="read-names-btn" class="btn secondary">🔊 Ler nomes em voz alta</button>
+  <ul class="book-list">
+    {% for e in result.entries %}
+    <li class="book-row"><span class="title">{{ e.name }}</span> <span class="hint">{{ e.phone }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">Ninguém se inscreveu ainda.</p>
+  {% endif %}
+</div>
+
+{% if phase == "signup" %}
+<div class="card">
+  <p class="hint">As inscrições ainda estão abertas. O sorteio só fica disponível depois que o prazo encerrar.</p>
+</div>
+
+{% elif phase == "ready" %}
+<div class="card">
+  <h2>Sorteio</h2>
+  <p class="hint">Inscrições encerradas — {{ result.entries|length }} inscrito{{ 's' if result.entries|length != 1 else '' }}, {{ raffle.winners_count }} sorteado{{ 's' if raffle.winners_count != 1 else '' }}.</p>
+  <button type="button" id="draw-btn" class="btn" {% if not result.entries %}disabled{% endif %}>🎲 Realizar sorteio</button>
+  <div id="draw-stage" hidden>
+    <div id="draw-countdown" class="draw-countdown"></div>
+    <div id="draw-reel" class="draw-reel"></div>
+  </div>
+</div>
+
+{% elif phase == "done" %}
+<div class="card">
+  <h2>🎉 Resultado</h2>
+  <ul class="book-list">
+    {% for w in result.winners %}
+    <li class="book-row">
+      <span class="title">{{ w.name }}</span>
+      <a href="{{ w.phone|whatsapp_link }}" target="_blank" rel="noopener" class="hint" style="text-decoration:underline;">
+        {{ w.phone|format_phone }} · abrir no WhatsApp ↗
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="hint">seed do sorteio (auditável): {{ result.draw.seed }}</p>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  var ttsControls = document.getElementById('tts-controls');
+  var rateInput = document.getElementById('rate-input');
+  var rateValueEl = document.getElementById('rate-value');
+  var supported = 'speechSynthesis' in window;
+  var selectedRate = supported ? parseFloat(localStorage.getItem('bookvote_tts_rate') || '1') : 1;
+
+  if (supported && ttsControls) {
+    ttsControls.hidden = false;
+
+    rateInput.value = selectedRate;
+    rateValueEl.textContent = selectedRate.toFixed(1) + 'x';
+    rateInput.addEventListener('input', function () {
+      selectedRate = parseFloat(rateInput.value);
+      rateValueEl.textContent = selectedRate.toFixed(1) + 'x';
+      localStorage.setItem('bookvote_tts_rate', String(selectedRate));
+    });
+  }
+
+  function speak(text) {
+    if (!supported) return;
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'pt-BR';
+    u.rate = selectedRate || 1;
+    window.speechSynthesis.speak(u);
+  }
+
+  var readBtn = document.getElementById('read-names-btn');
+  if (readBtn) {
+    readBtn.addEventListener('click', function () {
+      if (!supported) { alert('Seu navegador não suporta leitura em voz alta.'); return; }
+      window.speechSynthesis.cancel();
+      var names = [{% for e in result.entries %}{{ e.name|tojson }}{{ ',' if not loop.last }}{% endfor %}];
+      names.forEach(function (name) { speak(name); });
+    });
+  }
+
+  var drawBtn = document.getElementById('draw-btn');
+  if (!drawBtn) return;
+
+  drawBtn.addEventListener('click', function () {
+    if (!confirm('Realizar o sorteio agora? Essa ação não pode ser refeita.')) return;
+    drawBtn.disabled = true;
+
+    fetch('/admin/raffle/{{ raffle.admin_token }}/draw', { method: 'POST' })
+      .then(function (r) { if (!r.ok) throw new Error('draw failed'); return r.json(); })
+      .then(function (data) { playReveal(data.entries, data.winners); })
+      .catch(function () { alert('Não foi possível realizar o sorteio.'); drawBtn.disabled = false; });
+  });
+
+  function playReveal(entries, winners) {
+    var stage = document.getElementById('draw-stage');
+    var countdownEl = document.getElementById('draw-countdown');
+    var reelEl = document.getElementById('draw-reel');
+    stage.hidden = false;
+    drawBtn.hidden = true;
+
+    var pool = entries.slice();
+    var count = 3;
+    countdownEl.textContent = count;
+    countdownEl.classList.add('draw-pulse');
+
+    var countdownTimer = setInterval(function () {
+      count -= 1;
+      if (count > 0) {
+        countdownEl.textContent = count;
+        countdownEl.classList.remove('draw-pulse');
+        void countdownEl.offsetWidth; // restart the CSS animation
+        countdownEl.classList.add('draw-pulse');
+      } else {
+        clearInterval(countdownTimer);
+        countdownEl.hidden = true;
+        revealNext(0);
+      }
+    }, 800);
+
+    function revealNext(i) {
+      if (i >= winners.length) {
+        setTimeout(function () { window.location.reload(); }, 1500);
+        return;
+      }
+      spin(winners[i].name, function () {
+        // drop this winner from the pool so a later spin's cycling can't
+        // flash a name that's already been announced
+        pool = pool.filter(function (p) { return p.id !== winners[i].id; });
+        speak('E o sorteado é... ' + winners[i].name + '!');
+        setTimeout(function () { revealNext(i + 1); }, 2200);
+      });
+    }
+
+    function spin(finalName, onDone) {
+      var ticks = 0;
+      var maxTicks = 28;
+      var delay = 60;
+      reelEl.classList.remove('draw-reel-winner');
+
+      function tick() {
+        var candidate = pool.length ? pool[Math.floor(Math.random() * pool.length)].name : finalName;
+        reelEl.textContent = candidate;
+        reelEl.classList.toggle('draw-reel-flip');
+        ticks += 1;
+        if (ticks >= maxTicks) {
+          reelEl.textContent = finalName;
+          reelEl.classList.add('draw-reel-winner');
+          onDone();
+          return;
+        }
+        delay = delay * 1.08; // slot-machine-style deceleration
+        setTimeout(tick, delay);
+      }
+      tick();
+    }
+  }
+})();
+</script>
+{% endblock %}
