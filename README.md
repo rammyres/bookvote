@@ -1,4 +1,3 @@
-
 # Enquete de Livros
 
 Ferramenta para clubes de leitura, com dois módulos independentes, sem
@@ -91,6 +90,16 @@ não envia e-mail de administração. No plano gratuito sem domínio
 verificado, o remetente de testes só entrega pro e-mail da sua própria
 conta Resend; para enviar a qualquer pessoa, verifique um domínio em
 https://resend.com/domains e troque `RESEND_FROM_EMAIL`.
+
+**E-mails de mudança de fase** (indicações encerradas, empate, resultado
+final) dependem de `BOOKVOTE_BASE_URL` (ex.:
+`https://enquete.seudominio.com.br`, sem barra no final) — um verificador
+roda em segundo plano a cada 2 minutos (`BOOKVOTE_NOTIFY_INTERVAL_SECONDS`)
+e dispara esses e-mails assim que a fase muda, mesmo que ninguém abra a
+enquete ou o painel de admin naquele momento. Sem essa variável, esses
+e-mails só saem quando alguém efetivamente visita uma dessas páginas — o
+que pode significar horas de atraso numa enquete com pouco tráfego. O
+`setup_env.sh` já pergunta por ela.
 
 ## Rodar localmente
 

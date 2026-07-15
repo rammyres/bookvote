@@ -9,7 +9,8 @@
 # Uso não-interativo (exemplo):
 #   ./scripts/setup_env.sh --yes \
 #     --turnstile-site 0x4AAxxxxx --turnstile-secret 0x4AAyyyyy \
-#     --max-voters 8 --google-books-key SUA_CHAVE
+#     --max-voters 8 --google-books-key SUA_CHAVE \
+#     --base-url https://enquete.seudominio.com.br
 #
 # Sempre gera uma BOOKVOTE_SECRET_KEY nova se ainda não existir uma no .env.
 
@@ -27,6 +28,7 @@ COOKIE_SECURE=""
 GOOGLE_BOOKS_KEY=""
 RESEND_KEY=""
 RESEND_FROM=""
+BASE_URL=""
 
 usage() {
   grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,20p'
@@ -42,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --google-books-key) GOOGLE_BOOKS_KEY="$2"; shift 2 ;;
     --resend-key) RESEND_KEY="$2"; shift 2 ;;
     --resend-from) RESEND_FROM="$2"; shift 2 ;;
+    --base-url) BASE_URL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Opção desconhecida: $1" >&2; usage; exit 1 ;;
   esac
@@ -98,6 +101,7 @@ EXISTING_COOKIE_SECURE="true"
 EXISTING_GOOGLE_BOOKS_KEY=""
 EXISTING_RESEND_KEY=""
 EXISTING_RESEND_FROM="Enquete de Livros <onboarding@resend.dev>"
+EXISTING_BASE_URL=""
 
 if [[ -f "$ENV_FILE" ]]; then
   EXISTING_SECRET="$(get_env_value BOOKVOTE_SECRET_KEY "$ENV_FILE")"
@@ -111,6 +115,7 @@ if [[ -f "$ENV_FILE" ]]; then
   EXISTING_RESEND_KEY="$(get_env_value RESEND_API_KEY "$ENV_FILE")"
   val="$(get_env_value RESEND_FROM_EMAIL "$ENV_FILE")"
   EXISTING_RESEND_FROM="${val:-Enquete de Livros <onboarding@resend.dev>}"
+  EXISTING_BASE_URL="$(get_env_value BOOKVOTE_BASE_URL "$ENV_FILE")"
   cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%s)"
   echo "Backup do .env anterior salvo em $ENV_FILE.bak.<timestamp>"
 fi
@@ -142,6 +147,9 @@ fi
 if [[ -z "$COOKIE_SECURE" ]]; then
   COOKIE_SECURE="$(ask "Exigir HTTPS para o cookie de votante (true/false)" "$EXISTING_COOKIE_SECURE")"
 fi
+if [[ -z "$BASE_URL" ]]; then
+  BASE_URL="$(ask "URL pública completa (ex.: https://enquete.seudominio.com.br, sem barra no final) — necessária para o envio pontual de e-mails de mudança de fase" "$EXISTING_BASE_URL")"
+fi
 esc() {
   # Single-quotes the value for .env: since this file gets `source`d by
   # this very script on its next run (to preserve existing settings),
@@ -161,6 +169,7 @@ BOOKVOTE_MAX_VOTERS_PER_IP=$(esc "$MAX_VOTERS")
 GOOGLE_BOOKS_API_KEY=$(esc "$GOOGLE_BOOKS_KEY")
 RESEND_API_KEY=$(esc "$RESEND_KEY")
 RESEND_FROM_EMAIL=$(esc "$RESEND_FROM")
+BOOKVOTE_BASE_URL=$(esc "$BASE_URL")
 EOF
 
 chmod 600 "$ENV_FILE"
@@ -178,6 +187,15 @@ if [[ -z "$RESEND_KEY" ]]; then
   echo "Aviso: Resend não configurado — e-mails de administração (criação e"
   echo "recuperação de link) não serão enviados. Crie uma API key em"
   echo "https://resend.com/api-keys e rode este script de novo."
+fi
+
+if [[ -n "$RESEND_KEY" && -z "$BASE_URL" ]]; then
+  echo
+  echo "Aviso: BOOKVOTE_BASE_URL não configurada — os e-mails de mudança de"
+  echo "fase (indicações encerradas, empates, resultado final) só vão sair"
+  echo "quando alguém abrir a enquete ou o painel de admin, o que pode levar"
+  echo "horas numa enquete com pouco tráfego. Rode este script de novo com"
+  echo "--base-url https://seudominio.com.br para envio pontual em segundo plano."
 fi
 
 echo

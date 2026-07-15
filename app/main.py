@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 
 from .database import Base, SessionLocal, engine, get_db, ensure_column
 from .models import Book, Poll, Vote, VoterIdentity, Raffle, RaffleEntry, gen_short_id
@@ -304,7 +306,11 @@ def redirect_admin_with_error(admin_token: str, code: str) -> RedirectResponse:
     return RedirectResponse(url=f"/admin/{admin_token}?error={code}", status_code=303)
 
 
-async def maybe_notify_review(db: Session, poll: Poll, request: Request) -> None:
+def request_base_url(request: Request) -> str:
+    return f"{request.url.scheme}://{request.url.netloc}"
+
+
+async def maybe_notify_review(db: Session, poll: Poll, base_url: str) -> None:
     """Sends a one-time "nominations are frozen, come review them" email as
     soon as the nomination deadline passes and the poll enters PHASE_REVIEW."""
     if poll.review_email_sent or not poll.admin_email:
@@ -313,7 +319,7 @@ async def maybe_notify_review(db: Session, poll: Poll, request: Request) -> None
     books_count = (
         db.query(Book).filter(Book.poll_id == poll.id, Book.rejected.is_(False)).count()
     )
-    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    admin_url = f"{base_url}/admin/{poll.admin_token}"
     await send_email(
         to=poll.admin_email,
         subject=f"Indicações encerradas — {poll.title}",
@@ -329,7 +335,7 @@ async def maybe_notify_review(db: Session, poll: Poll, request: Request) -> None
     db.commit()
 
 
-async def maybe_notify_promotion_tie(db: Session, poll: Poll, request: Request) -> None:
+async def maybe_notify_promotion_tie(db: Session, poll: Poll, base_url: str) -> None:
     """Sends a one-time "there's a tie for the last finalist spot(s)" email
     once round 1 ends with more books tied at the cutoff than there's room
     for in the top 3."""
@@ -340,7 +346,7 @@ async def maybe_notify_promotion_tie(db: Session, poll: Poll, request: Request) 
     if not promotion.tie_group or promotion.resolved:
         return
 
-    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    admin_url = f"{base_url}/admin/{poll.admin_token}"
     tied_titles = ", ".join(t.book.title for t in promotion.tie_group)
     await send_email(
         to=poll.admin_email,
@@ -358,7 +364,7 @@ async def maybe_notify_promotion_tie(db: Session, poll: Poll, request: Request) 
     db.commit()
 
 
-async def maybe_notify_tie(db: Session, poll: Poll, request: Request) -> None:
+async def maybe_notify_tie(db: Session, poll: Poll, base_url: str) -> None:
     """Sends a one-time "there's a tie, come run the draw" email as soon as
     the final round closes with an unresolved 1st-place tie. Separate from
     maybe_notify_closure, which deliberately stays silent until the tie is
@@ -371,7 +377,7 @@ async def maybe_notify_tie(db: Session, poll: Poll, request: Request) -> None:
     if not results.tie_group or results.resolved:
         return  # no tie, or already resolved (draw already run)
 
-    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+    admin_url = f"{base_url}/admin/{poll.admin_token}"
     tied_titles = ", ".join(t.book.title for t in results.tie_group)
     await send_email(
         to=poll.admin_email,
@@ -388,7 +394,7 @@ async def maybe_notify_tie(db: Session, poll: Poll, request: Request) -> None:
     db.commit()
 
 
-async def maybe_notify_closure(db: Session, poll: Poll, request: Request) -> None:
+async def maybe_notify_closure(db: Session, poll: Poll, base_url: str) -> None:
     """Sends the poll creator a one-time "the vote is over" email, once the
     result is actually resolved (skipped while a 1st-place tie is still
     waiting on a draw, so the e-mail always reflects a real outcome)."""
@@ -400,8 +406,8 @@ async def maybe_notify_closure(db: Session, poll: Poll, request: Request) -> Non
         return  # tie pending a draw — try again next time someone loads a page
 
     champion_title = results.champion.book.title if results.champion else "(sem votos registrados)"
-    admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
-    public_url = f"{request.url.scheme}://{request.url.netloc}/p/{poll.id}"
+    admin_url = f"{base_url}/admin/{poll.admin_token}"
+    public_url = f"{base_url}/p/{poll.id}"
     await send_email(
         to=poll.admin_email,
         subject=f"Enquete encerrada — {poll.title}",
@@ -414,6 +420,73 @@ async def maybe_notify_closure(db: Session, poll: Poll, request: Request) -> Non
     )
     poll.close_email_sent = True
     db.commit()
+
+
+BOOKVOTE_BASE_URL = os.environ.get("BOOKVOTE_BASE_URL", "").strip().rstrip("/")
+NOTIFY_INTERVAL_SECONDS = int(os.environ.get("BOOKVOTE_NOTIFY_INTERVAL_SECONDS", "120"))
+_notify_logger = logging.getLogger("bookvote.notify")
+
+
+async def _run_pending_notifications() -> None:
+    """One sweep: every poll that might still owe a phase-transition e-mail
+    gets checked, regardless of whether anyone has actually loaded its page
+    since the phase changed. The maybe_notify_* functions are the same ones
+    the page routes call — each is idempotent (guarded by its own *_sent
+    flag) and self-contained (recomputes phase/results/tie state itself),
+    so calling them here is exactly as safe as a page view triggering them."""
+    with SessionLocal() as scan_db:
+        polls = (
+            scan_db.query(Poll)
+            .filter(
+                Poll.admin_email.isnot(None),
+                or_(
+                    Poll.review_email_sent.is_(False),
+                    Poll.promotion_tie_email_sent.is_(False),
+                    Poll.tie_email_sent.is_(False),
+                    Poll.close_email_sent.is_(False),
+                ),
+            )
+            .all()
+        )
+    for poll in polls:
+        db = SessionLocal()
+        try:
+            poll = db.merge(poll)
+            phase = pl.get_phase(poll)
+            if phase == pl.PHASE_REVIEW:
+                await maybe_notify_review(db, poll, BOOKVOTE_BASE_URL)
+            if phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
+                await maybe_notify_promotion_tie(db, poll, BOOKVOTE_BASE_URL)
+            if phase == pl.PHASE_CLOSED:
+                await maybe_notify_tie(db, poll, BOOKVOTE_BASE_URL)
+                await maybe_notify_closure(db, poll, BOOKVOTE_BASE_URL)
+        except Exception:
+            _notify_logger.exception("Falha ao checar notificações da enquete %s", poll.id)
+        finally:
+            db.close()
+
+
+async def _notification_loop() -> None:
+    if not BOOKVOTE_BASE_URL:
+        _notify_logger.warning(
+            "BOOKVOTE_BASE_URL não configurada — e-mails de mudança de fase (indicações "
+            "encerradas, empates, resultado final) só serão enviados quando alguém abrir "
+            "a página da enquete ou do painel de admin. Num clube com pouco tráfego isso "
+            "pode significar horas de atraso. Configure BOOKVOTE_BASE_URL (ex.: "
+            "https://enquete.seudominio.com.br) para envio pontual em segundo plano."
+        )
+        return
+    while True:
+        try:
+            await _run_pending_notifications()
+        except Exception:
+            _notify_logger.exception("Erro no loop de notificações em segundo plano")
+        await asyncio.sleep(NOTIFY_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_background_notifier() -> None:
+    asyncio.create_task(_notification_loop())
 
 
 # ---------------------------------------------------------------- home / create
@@ -754,12 +827,12 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
     current_index = PHASE_ORDER.index(phase)
 
     if real_phase == pl.PHASE_REVIEW:
-        await maybe_notify_review(db, poll, request)
+        await maybe_notify_review(db, poll, request_base_url(request))
     if real_phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
-        await maybe_notify_promotion_tie(db, poll, request)
+        await maybe_notify_promotion_tie(db, poll, request_base_url(request))
     if real_phase == pl.PHASE_CLOSED:
-        await maybe_notify_tie(db, poll, request)
-        await maybe_notify_closure(db, poll, request)
+        await maybe_notify_tie(db, poll, request_base_url(request))
+        await maybe_notify_closure(db, poll, request_base_url(request))
 
     # ?view=<phase> lets people revisit an already-concluded phase read-only
     # (e.g. see the nomination list or round-1 tally after voting has moved
@@ -1047,7 +1120,7 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
     phase = pl.get_phase(poll)
 
     if phase == pl.PHASE_REVIEW:
-        await maybe_notify_review(db, poll, request)
+        await maybe_notify_review(db, poll, request_base_url(request))
 
     round1_tally = (
         pl.tally(db, poll.id, round=1)
@@ -1060,13 +1133,13 @@ async def admin_dashboard(request: Request, admin_token: str, db: Session = Depe
 
     if phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
         promotion = pl.finalize_round1_promotion(db, poll)
-        await maybe_notify_promotion_tie(db, poll, request)
+        await maybe_notify_promotion_tie(db, poll, request_base_url(request))
         if promotion.resolved:
             round2_tally = pl.tally(db, poll.id, round=2, promoted_only=True)
     if phase == pl.PHASE_CLOSED and promotion and promotion.resolved:
         results = pl.compute_final_results(db, poll)
-        await maybe_notify_tie(db, poll, request)
-        await maybe_notify_closure(db, poll, request)
+        await maybe_notify_tie(db, poll, request_base_url(request))
+        await maybe_notify_closure(db, poll, request_base_url(request))
 
     tie_group_json = None
     if results and results.tie_group:
