@@ -115,6 +115,7 @@ ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
 ensure_column("draws", "kind", "VARCHAR DEFAULT 'champion'")
 ensure_column("polls", "promotion_tie_policy", "VARCHAR DEFAULT 'draw'")
+ensure_column("raffle_entries", "added_by_admin", "BOOLEAN DEFAULT 0")
 
 
 def _fix_over_promoted_polls() -> None:
@@ -684,6 +685,13 @@ async def raffle_signup(
     return RedirectResponse(url=f"/r/{raffle_id}?signed_up=1", status_code=303)
 
 
+RAFFLE_ADD_ENTRY_ERRORS = {
+    "invalid_phone": "Celular inválido — informe DDD + número.",
+    "duplicate_phone": "Esse número de celular já está inscrito neste sorteio.",
+    "wrong_phase": "Só dá pra adicionar manualmente depois que as inscrições encerrarem e antes do sorteio.",
+}
+
+
 @app.get("/admin/raffle/{admin_token}", response_class=HTMLResponse)
 def raffle_admin_dashboard(request: Request, admin_token: str, db: Session = Depends(get_db)):
     raffle = get_raffle_by_admin_token_or_404(db, admin_token)
@@ -694,8 +702,50 @@ def raffle_admin_dashboard(request: Request, admin_token: str, db: Session = Dep
             "raffle": raffle,
             "phase": rl.get_phase(raffle),
             "result": rl.get_result(db, raffle),
+            "form_error": RAFFLE_ADD_ENTRY_ERRORS.get(request.query_params.get("error")),
         },
     )
+
+
+@app.post("/admin/raffle/{admin_token}/add-entry")
+def raffle_admin_add_entry(
+    request: Request,
+    admin_token: str,
+    name: str = Form(...),
+    phone: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Lets the organizer add a last-minute entry after signup has closed
+    but before the draw runs — e.g. someone who confirmed by phone/
+    WhatsApp instead of the public form. Deliberately not allowed during
+    PHASE_SIGNUP: that window already has a public form with its own
+    anti-abuse checks: this admin shortcut isn't meant to bypass it."""
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    if rl.get_phase(raffle) != rl.PHASE_READY:
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=wrong_phase", status_code=303)
+
+    name_clean = name.strip()[:120]
+    phone_clean = normalize_phone(phone)
+    if not name_clean or len(phone_clean) < 10:
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=invalid_phone", status_code=303)
+
+    ip_h = hash_ip(request, raffle.id)
+    db.add(
+        RaffleEntry(
+            raffle_id=raffle.id,
+            name=name_clean,
+            phone=phone_clean,
+            ip_hash=ip_h,
+            added_by_admin=True,
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=duplicate_phone", status_code=303)
+
+    return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
 
 
 @app.post("/admin/raffle/{admin_token}/draw")

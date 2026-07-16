@@ -226,6 +226,10 @@ class RaffleEntry(Base):
     name = Column(String, nullable=False)
     phone = Column(String, nullable=False)
     ip_hash = Column(String, nullable=False, index=True)
+    # True when the organizer added this entry manually after signup
+    # closed (e.g. someone who confirmed by phone/WhatsApp) — kept only
+    # so the admin panel can flag it, avoiding "who added this?" later.
+    added_by_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=utcnow)
 
     raffle = relationship("Raffle", back_populates="entries")

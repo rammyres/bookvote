@@ -9,6 +9,7 @@
     Inscrições encerram em <span data-utc="{{ raffle.signup_end.isoformat() }}Z"></span>
     · {{ raffle.winners_count }} sorteado{{ 's' if raffle.winners_count != 1 else '' }}
   </p>
+  {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
 </div>
 
 <div class="card">
@@ -21,11 +22,24 @@
   <button type="button" id="read-names-btn" class="btn secondary">🔊 Ler nomes em voz alta</button>
   <ul class="book-list">
     {% for e in result.entries %}
-    <li class="book-row"><span class="title">{{ e.name }}</span> <span class="hint">{{ e.phone }}</span></li>
+    <li class="book-row">
+      <span class="title">{{ e.name }}</span> <span class="hint">{{ e.phone }}</span>
+      {% if e.added_by_admin %}<span class="hint">· adicionado manualmente</span>{% endif %}
+    </li>
     {% endfor %}
   </ul>
   {% else %}
   <p class="hint">Ninguém se inscreveu ainda.</p>
+  {% endif %}
+
+  {% if phase == "ready" %}
+  <form method="post" action="/admin/raffle/{{ raffle.admin_token }}/add-entry" class="manual-entry-form">
+    <label for="manual-name">Adicionar inscrito manualmente</label>
+    <input type="text" id="manual-name" name="name" required maxlength="120" placeholder="Nome">
+    <input type="tel" id="manual-phone" name="phone" required placeholder="(99) 99999-9999" inputmode="numeric">
+    <button type="submit" class="btn secondary">Adicionar</button>
+  </form>
+  <p class="hint">Só até o sorteio ser realizado — depois das inscrições encerradas, pra incluir quem confirmou por fora (WhatsApp, telefone etc.).</p>
   {% endif %}
 </div>
 
@@ -62,6 +76,20 @@
 </div>
 {% endif %}
 
+<script>
+(function () {
+  var phone = document.getElementById('manual-phone');
+  if (phone) {
+    phone.addEventListener('input', function () {
+      var d = phone.value.replace(/\D/g, '').slice(0, 11);
+      var out = d;
+      if (d.length > 2) out = '(' + d.slice(0, 2) + ') ' + d.slice(2);
+      if (d.length > 7) out = '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+      phone.value = out;
+    });
+  }
+})();
+</script>
 <script>
 (function () {
   var ttsControls = document.getElementById('tts-controls');
