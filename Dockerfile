@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY templates ./templates
 COPY static ./static
+COPY scripts ./scripts
 
 ENV BOOKVOTE_DATA_DIR=/data
 VOLUME ["/data"]
