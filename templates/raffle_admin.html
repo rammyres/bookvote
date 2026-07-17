@@ -13,7 +13,9 @@
 </div>
 
 <div class="card">
-  <h2>Inscritos ({{ result.entries|length }})</h2>
+  {% set active_entries = result.entries|rejectattr('rejected')|list %}
+  {% set rejected_entries = result.entries|selectattr('rejected')|list %}
+  <h2>Inscritos ({{ active_entries|length }}{% if rejected_entries %} · {{ rejected_entries|length }} recusado{{ 's' if rejected_entries|length != 1 else '' }}{% endif %})</h2>
   {% if result.entries %}
   <div class="tts-controls" id="tts-controls" hidden>
     <label for="rate-input">Velocidade da leitura: <span id="rate-value">1.0x</span></label>
@@ -22,9 +24,27 @@
   <button type="button" id="read-names-btn" class="btn secondary">🔊 Ler nomes em voz alta</button>
   <ul class="book-list">
     {% for e in result.entries %}
-    <li class="book-row">
-      <span class="title">{{ e.name }}</span> <span class="hint">{{ e.phone }}</span>
-      {% if e.added_by_admin %}<span class="hint">· adicionado manualmente</span>{% endif %}
+    <li class="book-row{% if e.rejected %} book-row-rejected{% endif %}">
+      <div class="book-row-text">
+        <span class="title">{{ e.name }}</span> <span class="hint">{{ e.phone }}</span>
+        {% if e.added_by_admin %}<span class="hint">· adicionado manualmente</span>{% endif %}
+
+        {% if e.rejected %}
+        <div class="reject-note">
+          Recusado{% if e.rejection_reason %}: {{ e.rejection_reason }}{% endif %}
+          {% if phase != "done" %}
+          <form method="post" action="/admin/raffle/{{ raffle.admin_token }}/entries/{{ e.id }}/unreject" style="display:inline;">
+            <button type="submit" class="secondary link-button">reverter</button>
+          </form>
+          {% endif %}
+        </div>
+        {% elif phase != "done" %}
+        <form method="post" action="/admin/raffle/{{ raffle.admin_token }}/entries/{{ e.id }}/reject" class="reject-form">
+          <input type="text" name="reason" placeholder="Motivo (opcional): duplicidade, não seguiu as regras...">
+          <button type="submit" class="secondary" onclick="return confirm('Recusar esta inscrição? Ela fica de fora do sorteio.');">Recusar</button>
+        </form>
+        {% endif %}
+      </div>
     </li>
     {% endfor %}
   </ul>
@@ -51,8 +71,8 @@
 {% elif phase == "ready" %}
 <div class="card">
   <h2>Sorteio</h2>
-  <p class="hint">Inscrições encerradas — {{ result.entries|length }} inscrito{{ 's' if result.entries|length != 1 else '' }}, {{ raffle.winners_count }} sorteado{{ 's' if raffle.winners_count != 1 else '' }}.</p>
-  <button type="button" id="draw-btn" class="btn" {% if not result.entries %}disabled{% endif %}>🎲 Realizar sorteio</button>
+  <p class="hint">Inscrições encerradas — {{ active_entries|length }} inscrito{{ 's' if active_entries|length != 1 else '' }} elegível, {{ raffle.winners_count }} sorteado{{ 's' if raffle.winners_count != 1 else '' }}.</p>
+  <button type="button" id="draw-btn" class="btn" {% if not active_entries %}disabled{% endif %}>🎲 Realizar sorteio</button>
   <div id="draw-stage" hidden>
     <div id="draw-countdown" class="draw-countdown"></div>
     <div id="draw-reel" class="draw-reel"></div>
@@ -123,7 +143,7 @@
     readBtn.addEventListener('click', function () {
       if (!supported) { alert('Seu navegador não suporta leitura em voz alta.'); return; }
       window.speechSynthesis.cancel();
-      var names = [{% for e in result.entries %}{{ e.name|tojson }}{{ ',' if not loop.last }}{% endfor %}];
+      var names = [{% for e in active_entries %}{{ e.name|tojson }}{{ ',' if not loop.last }}{% endfor %}];
       names.forEach(function (name) { speak(name); });
     });
   }

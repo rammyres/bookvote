@@ -42,11 +42,12 @@
   {% endif %}
 </div>
 
-{% if result.entries %}
+{% set active_entries = result.entries|rejectattr('rejected')|list %}
+{% if active_entries %}
 <div class="card">
-  <h2>Inscritos ({{ result.entries|length }})</h2>
+  <h2>Inscritos ({{ active_entries|length }})</h2>
   <ul class="book-list">
-    {% for e in result.entries %}
+    {% for e in active_entries %}
     <li class="book-row">
       <span class="title">{{ e.name }}</span>
       <span class="hint">{{ e.phone|mask_phone }}</span>

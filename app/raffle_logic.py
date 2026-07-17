@@ -66,9 +66,13 @@ def run_raffle_draw(db: Session, raffle: Raffle) -> RaffleDraw:
     responsible for the idempotency guard (only call this while
     get_phase(raffle) == PHASE_READY, which also implies raffle.drawn is
     still False)."""
-    entries = db.query(RaffleEntry).filter(RaffleEntry.raffle_id == raffle.id).all()
+    entries = (
+        db.query(RaffleEntry)
+        .filter(RaffleEntry.raffle_id == raffle.id, RaffleEntry.rejected.is_(False))
+        .all()
+    )
     if not entries:
-        raise ValueError("Nenhum inscrito para sortear.")
+        raise ValueError("Nenhum inscrito elegível para sortear.")
 
     k = min(raffle.winners_count, len(entries))
     candidate_ids = sorted(e.id for e in entries)

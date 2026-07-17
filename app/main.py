@@ -116,6 +116,8 @@ ensure_column("books", "rejection_reason", "VARCHAR")
 ensure_column("draws", "kind", "VARCHAR DEFAULT 'champion'")
 ensure_column("polls", "promotion_tie_policy", "VARCHAR DEFAULT 'draw'")
 ensure_column("raffle_entries", "added_by_admin", "BOOLEAN DEFAULT 0")
+ensure_column("raffle_entries", "rejected", "BOOLEAN DEFAULT 0")
+ensure_column("raffle_entries", "rejection_reason", "VARCHAR")
 
 
 def _fix_over_promoted_polls() -> None:
@@ -610,7 +612,7 @@ def view_raffle(request: Request, raffle_id: str, db: Session = Depends(get_db))
             "request": request,
             "raffle": raffle,
             "phase": phase,
-            "entry_count": len(result.entries),
+            "entry_count": sum(1 for e in result.entries if not e.rejected),
             "result": result,
             "form_error": RAFFLE_ERROR_MESSAGES.get(error),
             "captcha_enabled": CAPTCHA_ENABLED,
@@ -745,6 +747,39 @@ def raffle_admin_add_entry(
         db.rollback()
         return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=duplicate_phone", status_code=303)
 
+    return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
+
+
+@app.post("/admin/raffle/{admin_token}/entries/{entry_id}/reject")
+def raffle_reject_entry(
+    admin_token: str, entry_id: str, reason: str = Form(""), db: Session = Depends(get_db)
+):
+    """Disqualifies an entry (duplicate person under another number, broke
+    a stated rule, etc.) without deleting it — excluded from the draw pool
+    but kept for the record. Allowed any time before the draw runs."""
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    if rl.get_phase(raffle) == rl.PHASE_DONE:
+        raise HTTPException(400, "O sorteio já foi realizado.")
+    entry = db.query(RaffleEntry).filter(RaffleEntry.id == entry_id, RaffleEntry.raffle_id == raffle.id).first()
+    if not entry:
+        raise HTTPException(404, "Inscrito não encontrado.")
+    entry.rejected = True
+    entry.rejection_reason = reason.strip() or None
+    db.commit()
+    return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
+
+
+@app.post("/admin/raffle/{admin_token}/entries/{entry_id}/unreject")
+def raffle_unreject_entry(admin_token: str, entry_id: str, db: Session = Depends(get_db)):
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    if rl.get_phase(raffle) == rl.PHASE_DONE:
+        raise HTTPException(400, "O sorteio já foi realizado.")
+    entry = db.query(RaffleEntry).filter(RaffleEntry.id == entry_id, RaffleEntry.raffle_id == raffle.id).first()
+    if not entry:
+        raise HTTPException(404, "Inscrito não encontrado.")
+    entry.rejected = False
+    entry.rejection_reason = None
+    db.commit()
     return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
 
 

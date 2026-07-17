@@ -230,6 +230,12 @@ class RaffleEntry(Base):
     # closed (e.g. someone who confirmed by phone/WhatsApp) — kept only
     # so the admin panel can flag it, avoiding "who added this?" later.
     added_by_admin = Column(Boolean, default=False, nullable=False)
+    # Organizer can disqualify an entry (duplicate person under a
+    # different number, broke a stated rule, etc.) without deleting it —
+    # excluded from the draw pool but kept for the record, same pattern
+    # as Book.rejected for poll nominations.
+    rejected = Column(Boolean, default=False, nullable=False)
+    rejection_reason = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     raffle = relationship("Raffle", back_populates="entries")
