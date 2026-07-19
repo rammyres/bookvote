@@ -456,11 +456,18 @@ async def _run_pending_notifications() -> None:
             )
             .all()
         )
+    _notify_logger.info("Varredura: %d enquete(s) com notificação pendente.", len(polls))
     for poll in polls:
         db = SessionLocal()
         try:
             poll = db.merge(poll)
             phase = pl.get_phase(poll)
+            before = (
+                poll.review_email_sent,
+                poll.promotion_tie_email_sent,
+                poll.tie_email_sent,
+                poll.close_email_sent,
+            )
             if phase == pl.PHASE_REVIEW:
                 await maybe_notify_review(db, poll, BOOKVOTE_BASE_URL)
             if phase in (pl.PHASE_ROUND2, pl.PHASE_CLOSED):
@@ -468,6 +475,22 @@ async def _run_pending_notifications() -> None:
             if phase == pl.PHASE_CLOSED:
                 await maybe_notify_tie(db, poll, BOOKVOTE_BASE_URL)
                 await maybe_notify_closure(db, poll, BOOKVOTE_BASE_URL)
+            after = (
+                poll.review_email_sent,
+                poll.promotion_tie_email_sent,
+                poll.tie_email_sent,
+                poll.close_email_sent,
+            )
+            if after != before:
+                _notify_logger.info(
+                    "Enquete %s (%s, fase=%s): notificação enviada para %s.",
+                    poll.id, poll.title, phase, poll.admin_email,
+                )
+            else:
+                _notify_logger.info(
+                    "Enquete %s (%s): fase=%s, nada a notificar ainda nesta rodada.",
+                    poll.id, poll.title, phase,
+                )
         except Exception:
             _notify_logger.exception("Falha ao checar notificações da enquete %s", poll.id)
         finally:
@@ -484,6 +507,10 @@ async def _notification_loop() -> None:
             "https://enquete.seudominio.com.br) para envio pontual em segundo plano."
         )
         return
+    _notify_logger.info(
+        "Verificador de notificações em segundo plano iniciado (intervalo: %ds, base_url: %s).",
+        NOTIFY_INTERVAL_SECONDS, BOOKVOTE_BASE_URL,
+    )
     while True:
         try:
             await _run_pending_notifications()
