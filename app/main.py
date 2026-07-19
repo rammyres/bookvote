@@ -160,6 +160,7 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), na
 
 MAX_VOTER_IDENTITIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_VOTERS_PER_IP", "6"))
 MAX_RAFFLE_ENTRIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_RAFFLE_ENTRIES_PER_IP", "6"))
+BOOKVOTE_BASE_URL = os.environ.get("BOOKVOTE_BASE_URL", "").strip().rstrip("/")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_DIGITS_RE = re.compile(r"\D+")
@@ -310,7 +311,12 @@ def redirect_admin_with_error(admin_token: str, code: str) -> RedirectResponse:
 
 
 def request_base_url(request: Request) -> str:
-    return f"{request.url.scheme}://{request.url.netloc}"
+    """URL used to build links in notification e-mails. Prefers the
+    configured canonical BOOKVOTE_BASE_URL when set — otherwise a
+    notification triggered by someone visiting via a raw IP, an old
+    bookmark, or localhost while testing would bake that into the link,
+    even though the "real" public URL is what recipients need."""
+    return BOOKVOTE_BASE_URL or f"{request.url.scheme}://{request.url.netloc}"
 
 
 async def maybe_notify_review(db: Session, poll: Poll, base_url: str) -> None:
@@ -425,7 +431,6 @@ async def maybe_notify_closure(db: Session, poll: Poll, base_url: str) -> None:
     db.commit()
 
 
-BOOKVOTE_BASE_URL = os.environ.get("BOOKVOTE_BASE_URL", "").strip().rstrip("/")
 NOTIFY_INTERVAL_SECONDS = int(os.environ.get("BOOKVOTE_NOTIFY_INTERVAL_SECONDS", "120"))
 _notify_logger = logging.getLogger("bookvote.notify")
 
@@ -576,8 +581,8 @@ async def create_raffle(
     db.refresh(raffle)
 
     if raffle.admin_email:
-        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/raffle/{raffle.admin_token}"
-        public_url = f"{request.url.scheme}://{request.url.netloc}/r/{raffle.id}"
+        admin_url = f"{request_base_url(request)}/admin/raffle/{raffle.admin_token}"
+        public_url = f"{request_base_url(request)}/r/{raffle.id}"
         await send_email(
             to=raffle.admin_email,
             subject=f"Seu sorteio: {raffle.title}",
@@ -633,7 +638,7 @@ async def raffle_resend_admin_link(
     email_norm = email.strip().lower()
 
     if raffle.admin_email and raffle.admin_email.strip().lower() == email_norm:
-        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/raffle/{raffle.admin_token}"
+        admin_url = f"{request_base_url(request)}/admin/raffle/{raffle.admin_token}"
         await send_email(
             to=raffle.admin_email,
             subject=f"Link de administração — {raffle.title}",
@@ -878,8 +883,8 @@ async def create_poll(
     db.refresh(poll)
 
     if poll.admin_email:
-        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
-        public_url = f"{request.url.scheme}://{request.url.netloc}/p/{poll.id}"
+        admin_url = f"{request_base_url(request)}/admin/{poll.admin_token}"
+        public_url = f"{request_base_url(request)}/p/{poll.id}"
         await send_email(
             to=poll.admin_email,
             subject=f"Link de administração — {poll.title}",
@@ -1106,7 +1111,7 @@ async def resend_admin_link(request: Request, poll_id: str, email: str = Form(..
     email_norm = email.strip().lower()
 
     if poll.admin_email and poll.admin_email.strip().lower() == email_norm:
-        admin_url = f"{request.url.scheme}://{request.url.netloc}/admin/{poll.admin_token}"
+        admin_url = f"{request_base_url(request)}/admin/{poll.admin_token}"
         await send_email(
             to=poll.admin_email,
             subject=f"Link de administração — {poll.title}",
