@@ -18,10 +18,17 @@
   </p>
 
   <div class="meta-row">
-    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "review": "Indicações encerradas (revisão)", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada"}[phase] }}</strong></span>
+    <span>Fase atual: <strong>{{ {"nomination": "Indicações", "review": "Indicações encerradas (revisão)", "round1": "Votação 1 (múltipla)", "round2": "Votação 2 (única)", "closed": "Encerrada", "cancelled": "Cancelada"}.get(phase, phase) }}</strong></span>
   </div>
 
   {% if admin_error %}<div class="warning-box">{{ admin_error }}</div>{% endif %}
+
+  {% if phase == "cancelled" %}
+  <div class="warning-box">Esta enquete foi cancelada — visitantes veem um aviso no lugar da votação normal.</div>
+  <form method="post" action="/admin/{{ poll.admin_token }}/uncancel" onsubmit="return confirm('Reabrir esta enquete? Ela volta a seguir a fase correspondente aos prazos configurados.');">
+    <button type="submit" class="secondary">Reabrir enquete</button>
+  </form>
+  {% else %}
 
   {% set current_index = {"nomination": 0, "review": 1, "round1": 1, "round2": 2, "closed": 3}[phase] %}
 
@@ -47,6 +54,12 @@
   {% elif phase == "round2" %}
   <form method="post" action="/admin/{{ poll.admin_token }}/end-round2" onsubmit="return confirm('Encerrar a votação final agora?');">
     <button type="submit" class="secondary">Encerrar votação final agora</button>
+  </form>
+  {% endif %}
+
+  {% if phase != "closed" %}
+  <form method="post" action="/admin/{{ poll.admin_token }}/cancel" onsubmit="return confirm('Cancelar esta enquete? Visitantes vão ver um aviso de enquete cancelada em vez da votação normal. Dá pra reabrir depois, se for engano.');">
+    <button type="submit" class="secondary">Cancelar enquete (indicações desertas, engano, etc.)</button>
   </form>
   {% endif %}
 
@@ -94,6 +107,7 @@
     {% endif %}
   </div>
   <p class="hint">Estender só aceita datas depois do prazo atual. Para antecipar, use o botão "Encerrar ... agora" acima.</p>
+  {% endif %}
 
   <script>
     // Pre-fills each datetime-local "extend" field with its current

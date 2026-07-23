@@ -67,6 +67,11 @@ class Poll(Base):
     # set once, the first time anyone loads the poll after round1_end passes
     round1_promoted = Column(Boolean, default=False, nullable=False)
 
+    # organizer can call off a deserted/mistaken poll at any point before
+    # it closes — see poll_logic.get_phase, checked before every other
+    # phase condition
+    cancelled = Column(Boolean, default=False, nullable=False)
+
     # optional per-voter limits (anti-flood, not anti-bot per se)
     max_noms_per_voter = Column(Integer, default=3)
 
@@ -203,6 +208,10 @@ class Raffle(Base):
 
     # set once the draw has run — see raffle_logic.get_phase
     drawn = Column(Boolean, default=False, nullable=False)
+
+    # organizer can call off a deserted/mistaken raffle any time before the
+    # draw runs — see raffle_logic.get_phase, checked before drawn/signup_end
+    cancelled = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=utcnow)
 

@@ -11,6 +11,7 @@ from .models import Raffle, RaffleDraw, RaffleEntry
 PHASE_SIGNUP = "signup"  # entries open
 PHASE_READY = "ready"    # signup_end passed, draw not run yet
 PHASE_DONE = "done"      # draw has run
+PHASE_CANCELLED = "cancelled"  # organizer called it off — takes priority over everything else
 
 
 def now() -> datetime:
@@ -25,6 +26,8 @@ def as_aware(dt: datetime) -> datetime:
 
 
 def get_phase(raffle: Raffle) -> str:
+    if raffle.cancelled:
+        return PHASE_CANCELLED
     if raffle.drawn:
         return PHASE_DONE
     if now() < as_aware(raffle.signup_end):

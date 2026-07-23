@@ -10,6 +10,26 @@
     · {{ raffle.winners_count }} sorteado{{ 's' if raffle.winners_count != 1 else '' }}
   </p>
   {% if form_error %}<div class="warning-box">{{ form_error }}</div>{% endif %}
+
+  {% if phase == "cancelled" %}
+  <div class="warning-box">Este sorteio foi cancelado — visitantes veem um aviso no lugar da inscrição/resultado normal.</div>
+  <form method="post" action="/admin/raffle/{{ raffle.admin_token }}/uncancel" onsubmit="return confirm('Reabrir este sorteio? Ele volta a seguir a fase correspondente ao prazo configurado.');">
+    <button type="submit" class="secondary">Reabrir sorteio</button>
+  </form>
+  {% else %}
+  {% if phase == "signup" %}
+  <form method="post" action="/admin/raffle/{{ raffle.admin_token }}/extend" class="extend-form">
+    <input type="hidden" name="tz_offset" value="0">
+    <input type="datetime-local" name="new_end_local" required data-current-utc="{{ raffle.signup_end.isoformat() }}Z">
+    <button type="submit" class="secondary">Estender prazo de inscrição</button>
+  </form>
+  {% endif %}
+  {% if phase in ("signup", "ready") %}
+  <form method="post" action="/admin/raffle/{{ raffle.admin_token }}/cancel" onsubmit="return confirm('Cancelar este sorteio? Visitantes vão ver um aviso de sorteio cancelado em vez da inscrição/resultado normal. Dá pra reabrir depois, se for engano.');">
+    <button type="submit" class="secondary">Cancelar sorteio (inscrição deserta, engano, etc.)</button>
+  </form>
+  {% endif %}
+  {% endif %}
 </div>
 
 <div class="card">
@@ -109,6 +129,17 @@
     });
   }
 })();
+</script>
+<script>
+  // Pre-fills the "extend" field with its current deadline converted to
+  // the visitor's local time (same behavior as the poll admin page).
+  document.querySelectorAll('input[data-current-utc]').forEach(function (el) {
+    var d = new Date(el.getAttribute('data-current-utc'));
+    if (isNaN(d.getTime())) return;
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    el.value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  });
 </script>
 <script>
 (function () {

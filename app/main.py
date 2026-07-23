@@ -115,9 +115,11 @@ ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
 ensure_column("draws", "kind", "VARCHAR DEFAULT 'champion'")
 ensure_column("polls", "promotion_tie_policy", "VARCHAR DEFAULT 'draw'")
+ensure_column("polls", "cancelled", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "added_by_admin", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "rejection_reason", "VARCHAR")
+ensure_column("raffles", "cancelled", "BOOLEAN DEFAULT 0")
 
 
 def _fix_over_promoted_polls() -> None:
@@ -303,6 +305,7 @@ ADMIN_ERROR_MESSAGES = {
     "phase_over": "Essa fase já foi concluída, não é mais possível estender o prazo dela.",
     "order": "O novo prazo entraria em conflito com o prazo de outra fase — estenda essa outra fase primeiro, se for o caso.",
     "bad_phase": "Fase inválida.",
+    "poll_closed": "A enquete já foi encerrada com um resultado final — não dá mais para cancelar.",
 }
 
 
@@ -447,6 +450,7 @@ async def _run_pending_notifications() -> None:
             scan_db.query(Poll)
             .filter(
                 Poll.admin_email.isnot(None),
+                Poll.cancelled.is_(False),
                 or_(
                     Poll.review_email_sent.is_(False),
                     Poll.promotion_tie_email_sent.is_(False),
@@ -540,6 +544,7 @@ RAFFLE_PHASE_LABELS = {
     rl.PHASE_SIGNUP: "Inscrições abertas",
     rl.PHASE_READY: "Aguardando sorteio",
     rl.PHASE_DONE: "Sorteio realizado",
+    rl.PHASE_CANCELLED: "Cancelado",
 }
 
 
@@ -549,9 +554,9 @@ def list_raffles(request: Request, status: str = "open", db: Session = Depends(g
     all_raffles = db.query(Raffle).order_by(Raffle.created_at.desc()).all()
     tagged = [(r, rl.get_phase(r)) for r in all_raffles]
     if status == "closed":
-        tagged = [(r, phase) for r, phase in tagged if phase == rl.PHASE_DONE]
+        tagged = [(r, phase) for r, phase in tagged if phase in (rl.PHASE_DONE, rl.PHASE_CANCELLED)]
     else:
-        tagged = [(r, phase) for r, phase in tagged if phase != rl.PHASE_DONE]
+        tagged = [(r, phase) for r, phase in tagged if phase not in (rl.PHASE_DONE, rl.PHASE_CANCELLED)]
     return templates.TemplateResponse(
         "raffle_list.html",
         {"request": request, "raffles": tagged, "status": status, "phase_labels": RAFFLE_PHASE_LABELS},
@@ -719,10 +724,13 @@ async def raffle_signup(
     return RedirectResponse(url=f"/r/{raffle_id}?signed_up=1", status_code=303)
 
 
-RAFFLE_ADD_ENTRY_ERRORS = {
+RAFFLE_ADMIN_ERRORS = {
     "invalid_phone": "Celular inválido — informe DDD + número.",
     "duplicate_phone": "Esse número de celular já está inscrito neste sorteio.",
     "wrong_phase": "Só dá pra adicionar manualmente depois que as inscrições encerrarem e antes do sorteio.",
+    "bad_dates": "Data inválida.",
+    "not_extension": "O novo prazo precisa ser depois do prazo atual — isso é uma extensão, não uma antecipação.",
+    "already_done": "O sorteio já foi realizado — não dá mais para estender ou cancelar.",
 }
 
 
@@ -736,9 +744,53 @@ def raffle_admin_dashboard(request: Request, admin_token: str, db: Session = Dep
             "raffle": raffle,
             "phase": rl.get_phase(raffle),
             "result": rl.get_result(db, raffle),
-            "form_error": RAFFLE_ADD_ENTRY_ERRORS.get(request.query_params.get("error")),
+            "form_error": RAFFLE_ADMIN_ERRORS.get(request.query_params.get("error")),
         },
     )
+
+
+@app.post("/admin/raffle/{admin_token}/extend")
+def extend_raffle_signup(
+    admin_token: str,
+    new_end_local: str = Form(...),
+    tz_offset: int = Form(0),
+    db: Session = Depends(get_db),
+):
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    phase = rl.get_phase(raffle)
+    if phase not in (rl.PHASE_SIGNUP, rl.PHASE_READY):
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=already_done", status_code=303)
+    try:
+        new_end = parse_local_datetime(new_end_local, tz_offset)
+    except ValueError:
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=bad_dates", status_code=303)
+    if new_end <= rl.as_aware(raffle.signup_end):
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=not_extension", status_code=303)
+    raffle.signup_end = new_end
+    db.commit()
+    return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
+
+
+@app.post("/admin/raffle/{admin_token}/cancel")
+def cancel_raffle(admin_token: str, db: Session = Depends(get_db)):
+    """Calls off a deserted or mistaken raffle — e.g. nobody signed up and
+    the club moved on. Blocked once the draw has already run: at that
+    point there's a real outcome to leave alone, not a dead raffle to
+    bury."""
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    if rl.get_phase(raffle) == rl.PHASE_DONE:
+        return RedirectResponse(url=f"/admin/raffle/{admin_token}?error=already_done", status_code=303)
+    raffle.cancelled = True
+    db.commit()
+    return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
+
+
+@app.post("/admin/raffle/{admin_token}/uncancel")
+def uncancel_raffle(admin_token: str, db: Session = Depends(get_db)):
+    raffle = get_raffle_by_admin_token_or_404(db, admin_token)
+    raffle.cancelled = False
+    db.commit()
+    return RedirectResponse(url=f"/admin/raffle/{admin_token}", status_code=303)
 
 
 @app.post("/admin/raffle/{admin_token}/add-entry")
@@ -843,9 +895,9 @@ def list_polls(request: Request, status: str = "open", db: Session = Depends(get
     all_polls = db.query(Poll).order_by(Poll.created_at.desc()).all()
     tagged = [(p, pl.get_phase(p)) for p in all_polls]
     if status == "closed":
-        tagged = [(p, phase) for p, phase in tagged if phase == pl.PHASE_CLOSED]
+        tagged = [(p, phase) for p, phase in tagged if phase in (pl.PHASE_CLOSED, pl.PHASE_CANCELLED)]
     else:
-        tagged = [(p, phase) for p, phase in tagged if phase != pl.PHASE_CLOSED]
+        tagged = [(p, phase) for p, phase in tagged if phase not in (pl.PHASE_CLOSED, pl.PHASE_CANCELLED)]
     return templates.TemplateResponse(
         "poll_list.html", {"request": request, "polls": tagged, "status": status}
     )
@@ -938,6 +990,19 @@ async def view_poll(request: Request, poll_id: str, response: Response, db: Sess
     poll = get_poll_or_404(db, poll_id)
     voter_id = get_or_set_voter_id(request, response)
     real_phase = pl.get_phase(poll)
+
+    if real_phase == pl.PHASE_CANCELLED:
+        return templates.TemplateResponse(
+            "poll_cancelled.html",
+            {
+                "request": request,
+                "poll": poll,
+                "show_recovery": True,
+                "recovery_action": f"/p/{poll.id}/resend-admin-link",
+                "recovery_noun": "a enquete",
+            },
+        )
+
     # PHASE_REVIEW shares the "Indicações" tab with PHASE_NOMINATION — it's
     # still the same step from a visitor's point of view, just frozen.
     phase = pl.PHASE_NOMINATION if real_phase == pl.PHASE_REVIEW else real_phase
@@ -1370,6 +1435,28 @@ def extend_deadline(
     else:
         return redirect_admin_with_error(admin_token, "bad_phase")
 
+    db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/cancel")
+def cancel_poll(admin_token: str, db: Session = Depends(get_db)):
+    """Calls off a deserted or mistaken poll — e.g. nobody nominated
+    anything and the club moved on. Blocked once results are already
+    final (PHASE_CLOSED): at that point there's a real outcome to leave
+    alone, not a dead poll to bury."""
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    if pl.get_phase(poll) == pl.PHASE_CLOSED:
+        return redirect_admin_with_error(admin_token, "poll_closed")
+    poll.cancelled = True
+    db.commit()
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/uncancel")
+def uncancel_poll(admin_token: str, db: Session = Depends(get_db)):
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    poll.cancelled = False
     db.commit()
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 

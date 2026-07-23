@@ -39,11 +39,14 @@
     <li class="book-row"><span class="title">{{ w.name }}</span></li>
     {% endfor %}
   </ul>
+
+  {% elif phase == "cancelled" %}
+  <p class="poll-desc">Este sorteio foi cancelado pelo organizador.</p>
   {% endif %}
 </div>
 
 {% set active_entries = result.entries|rejectattr('rejected')|list %}
-{% if active_entries %}
+{% if phase != "cancelled" and active_entries %}
 <div class="card">
   <h2>Inscritos ({{ active_entries|length }})</h2>
   <ul class="book-list">

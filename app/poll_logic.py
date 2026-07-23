@@ -15,6 +15,7 @@ PHASE_REVIEW = "review"   # nomination_end passed; frozen until the admin releas
 PHASE_ROUND1 = "round1"   # multi-vote, every nominated book
 PHASE_ROUND2 = "round2"   # single-vote, only promoted books
 PHASE_CLOSED = "closed"
+PHASE_CANCELLED = "cancelled"  # organizer called it off — takes priority over everything else
 
 
 def now() -> datetime:
@@ -29,6 +30,8 @@ def as_aware(dt: datetime) -> datetime:
 
 
 def get_phase(poll: Poll) -> str:
+    if poll.cancelled:
+        return PHASE_CANCELLED
     t = now()
     if t < as_aware(poll.nomination_end):
         return PHASE_NOMINATION
