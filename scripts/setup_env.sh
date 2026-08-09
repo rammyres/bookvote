@@ -195,7 +195,8 @@ if [[ -n "$RESEND_KEY" && -z "$BASE_URL" ]]; then
   echo "fase (indicações encerradas, empates, resultado final) só vão sair"
   echo "quando alguém abrir a enquete ou o painel de admin, o que pode levar"
   echo "horas numa enquete com pouco tráfego. Rode este script de novo com"
-  echo "--base-url https://seudominio.com.br para envio pontual em segundo plano."
+  echo "--base-url https://seudominio.com.br e agende scripts/notify.py no"
+  echo "crontab do host (veja o README) para envio pontual."
 fi
 
 echo

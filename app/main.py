@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -332,7 +331,7 @@ async def maybe_notify_review(db: Session, poll: Poll, base_url: str) -> None:
         db.query(Book).filter(Book.poll_id == poll.id, Book.rejected.is_(False)).count()
     )
     admin_url = f"{base_url}/admin/{poll.admin_token}"
-    await send_email(
+    sent = await send_email(
         to=poll.admin_email,
         subject=f"Indicações encerradas — {poll.title}",
         html=(
@@ -343,6 +342,8 @@ async def maybe_notify_review(db: Session, poll: Poll, base_url: str) -> None:
             f'<p><a href="{admin_url}">{admin_url}</a></p>'
         ),
     )
+    if not sent:
+        return  # transient failure (Resend down, etc.) — try again next sweep
     poll.review_email_sent = True
     db.commit()
 
@@ -360,7 +361,7 @@ async def maybe_notify_promotion_tie(db: Session, poll: Poll, base_url: str) -> 
 
     admin_url = f"{base_url}/admin/{poll.admin_token}"
     tied_titles = ", ".join(t.book.title for t in promotion.tie_group)
-    await send_email(
+    sent = await send_email(
         to=poll.admin_email,
         subject=f"Empate na 1ª votação — {poll.title}",
         html=(
@@ -372,6 +373,8 @@ async def maybe_notify_promotion_tie(db: Session, poll: Poll, base_url: str) -> 
             f'<p><a href="{admin_url}">{admin_url}</a></p>'
         ),
     )
+    if not sent:
+        return
     poll.promotion_tie_email_sent = True
     db.commit()
 
@@ -391,7 +394,7 @@ async def maybe_notify_tie(db: Session, poll: Poll, base_url: str) -> None:
 
     admin_url = f"{base_url}/admin/{poll.admin_token}"
     tied_titles = ", ".join(t.book.title for t in results.tie_group)
-    await send_email(
+    sent = await send_email(
         to=poll.admin_email,
         subject=f"Empate na votação final — {poll.title}",
         html=(
@@ -402,6 +405,8 @@ async def maybe_notify_tie(db: Session, poll: Poll, base_url: str) -> None:
             f'<p><a href="{admin_url}">{admin_url}</a></p>'
         ),
     )
+    if not sent:
+        return
     poll.tie_email_sent = True
     db.commit()
 
@@ -420,7 +425,7 @@ async def maybe_notify_closure(db: Session, poll: Poll, base_url: str) -> None:
     champion_title = results.champion.book.title if results.champion else "(sem votos registrados)"
     admin_url = f"{base_url}/admin/{poll.admin_token}"
     public_url = f"{base_url}/p/{poll.id}"
-    await send_email(
+    sent = await send_email(
         to=poll.admin_email,
         subject=f"Enquete encerrada — {poll.title}",
         html=(
@@ -430,21 +435,35 @@ async def maybe_notify_closure(db: Session, poll: Poll, base_url: str) -> None:
             f'<p>Painel de administração: <a href="{admin_url}">{admin_url}</a></p>'
         ),
     )
+    if not sent:
+        return
     poll.close_email_sent = True
     db.commit()
 
 
-NOTIFY_INTERVAL_SECONDS = int(os.environ.get("BOOKVOTE_NOTIFY_INTERVAL_SECONDS", "120"))
 _notify_logger = logging.getLogger("bookvote.notify")
 
 
-async def _run_pending_notifications() -> None:
+async def run_pending_notifications() -> None:
     """One sweep: every poll that might still owe a phase-transition e-mail
     gets checked, regardless of whether anyone has actually loaded its page
     since the phase changed. The maybe_notify_* functions are the same ones
     the page routes call — each is idempotent (guarded by its own *_sent
     flag) and self-contained (recomputes phase/results/tie state itself),
-    so calling them here is exactly as safe as a page view triggering them."""
+    so calling them here is exactly as safe as a page view triggering them.
+
+    Called from scripts/notify.py, meant to run on a schedule (cron) —
+    kept out of the web process itself so it doesn't depend on that
+    process's uptime/restarts, and so its schedule is a plain, inspectable
+    crontab line instead of an asyncio loop nobody can see from outside."""
+    if not BOOKVOTE_BASE_URL:
+        _notify_logger.warning(
+            "BOOKVOTE_BASE_URL não configurada — e-mails de mudança de fase (indicações "
+            "encerradas, empates, resultado final) só serão enviados quando alguém abrir "
+            "a página da enquete ou do painel de admin. Configure BOOKVOTE_BASE_URL (ex.: "
+            "https://enquete.seudominio.com.br) para o envio pontual via cron funcionar."
+        )
+        return
     with SessionLocal() as scan_db:
         polls = (
             scan_db.query(Poll)
@@ -499,33 +518,6 @@ async def _run_pending_notifications() -> None:
             _notify_logger.exception("Falha ao checar notificações da enquete %s", poll.id)
         finally:
             db.close()
-
-
-async def _notification_loop() -> None:
-    if not BOOKVOTE_BASE_URL:
-        _notify_logger.warning(
-            "BOOKVOTE_BASE_URL não configurada — e-mails de mudança de fase (indicações "
-            "encerradas, empates, resultado final) só serão enviados quando alguém abrir "
-            "a página da enquete ou do painel de admin. Num clube com pouco tráfego isso "
-            "pode significar horas de atraso. Configure BOOKVOTE_BASE_URL (ex.: "
-            "https://enquete.seudominio.com.br) para envio pontual em segundo plano."
-        )
-        return
-    _notify_logger.info(
-        "Verificador de notificações em segundo plano iniciado (intervalo: %ds, base_url: %s).",
-        NOTIFY_INTERVAL_SECONDS, BOOKVOTE_BASE_URL,
-    )
-    while True:
-        try:
-            await _run_pending_notifications()
-        except Exception:
-            _notify_logger.exception("Erro no loop de notificações em segundo plano")
-        await asyncio.sleep(NOTIFY_INTERVAL_SECONDS)
-
-
-@app.on_event("startup")
-async def _start_background_notifier() -> None:
-    asyncio.create_task(_notification_loop())
 
 
 # ---------------------------------------------------------------- home / create
