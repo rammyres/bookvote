@@ -832,3 +832,53 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
   letter-spacing: 0.04em;
   color: var(--ink-soft, inherit);
 }
+
+/* destaque na home: em andamento + categoria "Leitura principal" */
+.lc-featured {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  margin: 1.5rem auto 0.5rem;
+  padding: 1.25rem;
+  max-width: 640px;
+  color: inherit;
+  text-decoration: none;
+  text-align: left;
+  background: #fbf7ec;
+  border: 2px solid var(--brass);
+  border-left-width: 8px;
+  border-radius: 6px;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.25);
+}
+.lc-featured:hover, .lc-featured:focus-visible { border-color: var(--stamp); }
+.lc-featured:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.lc-featured-cover { flex: 0 0 min(38%, 190px); }
+.lc-featured-info { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.lc-featured-tag {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  background: var(--brass);
+  color: #241E14;
+  font-weight: 600;
+  border-radius: 2px;
+}
+.lc-featured-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  line-height: 1.15;
+  color: var(--text-on-paper);
+}
+.lc-featured-author { color: #5A4F3B; }
+.lc-featured-desc { font-size: 0.92rem; color: var(--text-on-paper); margin-top: 0.35rem; }
+.lc-featured-cta { margin-top: 0.5rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--stamp); }
+@media (max-width: 520px) {
+  .lc-featured { flex-direction: column; text-align: center; }
+  .lc-featured-cover { flex-basis: auto; width: min(60%, 200px); }
+  .lc-featured-info { align-items: center; }
+  .lc-featured-tag { align-self: center; }
+}

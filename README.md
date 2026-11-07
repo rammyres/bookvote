@@ -94,6 +94,11 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   agrupamento (quando ligado) vale nas duas. O banco ganha a coluna
   `category_id` e as tabelas `lc_categories` e `site_settings` sozinhos na
   primeira subida (sem migração manual).
+- **Destaque na home**: leitura *em andamento* cuja categoria se chama
+  **"Leitura principal"** (sem diferença de maiúsculas/acentos) aparece num
+  bloco grande no topo da seção de andamento, com capa, autor, período e
+  trecho da descrição, e sai da grade abaixo. Basta criar a categoria com
+  esse nome em `/adminlc/categorias` (renomeá-la desliga o destaque).
 - **Capa**: busca no Google Books (preenche título, autor, ISBN e capa) ou
   upload de JPG/PNG/WEBP/GIF até 5 MB. A capa do Google é **baixada para o
   servidor** (`/data/lc_covers`, mesmo volume do banco) — se o download

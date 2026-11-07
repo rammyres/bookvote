@@ -47,6 +47,7 @@ def build_router(templates, limiter) -> APIRouter:
     templates.env.globals["LC_GROUP_PAGES"] = lc.GROUP_PAGES
     templates.env.globals["LC_GROUP_PAGE_LABELS"] = lc.GROUP_PAGE_LABELS
     templates.env.globals["group_readings"] = lc.group_readings
+    templates.env.globals["split_featured"] = lc.split_featured
 
     # ------------------------------------------------------------ dependências
 

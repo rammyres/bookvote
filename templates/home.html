@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Enquete de Livros{% endblock %}
 {% block content %}
-{% from "_lc_macros.html" import lc_sections with context %}
+{% from "_lc_macros.html" import lc_sections, lc_featured with context %}
 {% set ongoing = lc_groups["ongoing"] %}
 {% set planned = lc_groups["planned"] %}
 {% set done = lc_groups["done"] %}
@@ -9,7 +9,9 @@
 <section class="card landing-card lc-card">
   <h1>Leituras coletivas em andamento</h1>
   {% if ongoing %}
-  {{ lc_sections(ongoing, lc_group_mode) }}
+  {% set featured, rest = split_featured(ongoing) %}
+  {% for r in featured %}{{ lc_featured(r) }}{% endfor %}
+  {% if rest %}{{ lc_sections(rest, lc_group_mode) }}{% endif %}
   {% else %}
   <p class="poll-desc">Nenhuma leitura coletiva em andamento agora.</p>
   {% endif %}

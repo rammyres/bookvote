@@ -195,6 +195,31 @@ def group_readings(readings, mode: str) -> list[tuple[Optional[str], list]]:
     return out
 
 
+# ------------------------------------------------------------------ destaque
+
+# Leituras em andamento cuja categoria tem este nome ganham destaque na
+# página inicial. Comparação sem acento/caixa; se a categoria for renomeada,
+# o destaque deixa de valer (é pelo nome, de propósito: não exige config).
+FEATURED_CATEGORY_NAME = "Leitura principal"
+
+
+def is_featured(reading) -> bool:
+    cat = getattr(reading, "category", None)
+    return (
+        getattr(reading, "state", None) == STATE_ONGOING
+        and cat is not None
+        and _fold(cat.name.strip()) == _fold(FEATURED_CATEGORY_NAME)
+    )
+
+
+def split_featured(readings) -> tuple[list, list]:
+    """(destaques, demais), mantendo a ordem da lista."""
+    featured, rest = [], []
+    for r in readings:
+        (featured if is_featured(r) else rest).append(r)
+    return featured, rest
+
+
 # ---------------------------------------------------------------- categorias
 
 def list_categories(db: Session) -> list[LCCategory]:
