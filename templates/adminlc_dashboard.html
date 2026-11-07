@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_lc_macros.html" import lc_when with context %}
+{% block title %}Administração das leituras coletivas{% endblock %}
+{% block content %}
+{% macro row(r) %}
+<li class="book-row lc-admin-row">
+  {% if r.cover_src %}
+  <img src="{{ r.cover_src }}" alt="" class="lc-admin-thumb">
+  {% else %}
+  <span class="lc-admin-thumb lc-admin-thumb-empty" aria-hidden="true">📕</span>
+  {% endif %}
+  <div class="book-row-text">
+    <a href="/lc/{{ r.id }}" class="title" style="text-decoration:underline;">{{ r.title }}</a>
+    {% if r.author %}<br><span class="author">{{ r.author }}</span>{% endif %}
+    {% set when %}{{ lc_when(r) }}{% endset %}
+    {% if when|trim %}<br><span class="isbn">{{ when|trim }}</span>{% endif %}
+    {% if r.state == "ongoing" and r.end_date and r.end_date < today %}
+    <br><span class="lc-overdue">O fim do cronograma já passou — marque como concluída quando terminar.</span>
+    {% endif %}
+    <div class="lc-actions">
+      <a class="btn secondary" href="/adminlc/lc/{{ r.id }}/edit">Editar</a>
+      {% if r.state == "ongoing" %}
+      <form method="post" action="/adminlc/lc/{{ r.id }}/state"><input type="hidden" name="state" value="done"><button type="submit" class="secondary">Marcar como concluída</button></form>
+      {% elif r.state == "done" %}
+      <form method="post" action="/adminlc/lc/{{ r.id }}/state"><input type="hidden" name="state" value="ongoing"><button type="submit" class="secondary">Reabrir</button></form>
+      {% endif %}
+      <form method="post" action="/adminlc/lc/{{ r.id }}/delete" onsubmit="return confirm('Apagar &quot;{{ r.title|e }}&quot;? Isso não tem volta.');"><button type="submit" class="secondary danger">Apagar</button></form>
+    </div>
+  </div>
+</li>
+{% endmacro %}
+
+<div class="card lc-form">
+  <div class="lc-topbar">
+    <h1>Administração das LCs</h1>
+    <span class="hint">{{ admin.display_name or admin.username }}{% if admin.is_main %} · principal{% endif %}</span>
+  </div>
+  <div class="lc-actions">
+    <a class="btn" href="/adminlc/lc/new">Nova leitura coletiva</a>
+    <a class="btn secondary" href="/adminlc/admins">{{ "Administradores" if admin.is_main else "Minha senha" }}</a>
+    <a class="btn secondary" href="/">Ver o site</a>
+    <form method="post" action="/adminlc/logout"><button type="submit" class="secondary">Sair</button></form>
+  </div>
+  {% if msg %}<div class="notice-box">{{ msg }}</div>{% endif %}
+</div>
+
+{% for key, title, empty in (
+  ("ongoing", "Em andamento", "Nenhuma leitura em andamento."),
+  ("planned", "Previstas", "Nenhuma leitura prevista. Quando a data de início chegar, ela passa sozinha para \"em andamento\"."),
+  ("done", "Concluídas", "Nenhuma leitura concluída.")) %}
+<div class="card lc-form">
+  <h2>{{ title }} ({{ groups[key]|length }})</h2>
+  {% if groups[key] %}
+  <ul class="book-list">{% for r in groups[key] %}{{ row(r) }}{% endfor %}</ul>
+  {% else %}
+  <p class="hint">{{ empty }}</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

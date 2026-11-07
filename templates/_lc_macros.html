@@ -1,0 +1,27 @@
+{% macro lc_cover(lc, extra_class="") %}
+{% if lc.cover_src %}
+<img class="lc-cover {{ extra_class }}" src="{{ lc.cover_src }}" alt="Capa de {{ lc.title }}" loading="lazy">
+{% else %}
+<div class="lc-cover lc-cover-placeholder {{ extra_class }}" role="img" aria-label="Sem capa: {{ lc.title }}"><span>{{ lc.title }}</span></div>
+{% endif %}
+{% endmacro %}
+
+{% macro lc_when(lc) %}
+{%- if lc.state == "planned" -%}
+  {%- if lc.start_date %}Começa em {{ lc.start_date|br_date }}{% else %}Em breve{% endif -%}
+{%- elif lc.state == "ongoing" -%}
+  {%- if lc.end_date %}Até {{ lc.end_date|br_date }}{% elif lc.start_date %}Desde {{ lc.start_date|br_date }}{% else %}Em andamento{% endif -%}
+{%- else -%}
+  {%- if lc.start_date and lc.end_date %}{{ lc.start_date|br_date }} a {{ lc.end_date|br_date }}{% elif lc.end_date %}Até {{ lc.end_date|br_date }}{% endif -%}
+{%- endif -%}
+{% endmacro %}
+
+{% macro lc_item(lc) %}
+<a class="lc-item" href="/lc/{{ lc.id }}">
+  {{ lc_cover(lc) }}
+  <span class="lc-item-title">{{ lc.title }}</span>
+  {% if lc.author %}<span class="lc-item-author">{{ lc.author }}</span>{% endif %}
+  {% set when %}{{ lc_when(lc) }}{% endset %}
+  {% if when|trim %}<span class="lc-item-when">{{ when|trim }}</span>{% endif %}
+</a>
+{% endmacro %}

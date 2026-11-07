@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Administração das leituras coletivas{% endblock %}
+{% block content %}
+<div class="card lc-form" style="max-width:26rem;margin:0 auto;">
+  <h1>Administração das LCs</h1>
+  {% if msg %}<div class="notice-box">{{ msg }}</div>{% endif %}
+  {% if error %}<div class="warning-box">{{ error }}</div>{% endif %}
+
+  {% if has_admin %}
+  <form method="post" action="/adminlc/login">
+    <label for="username">Usuário</label>
+    <input type="text" id="username" name="username" value="{{ username }}" required autocomplete="username" autocapitalize="none" autofocus>
+
+    <label for="password">Senha</label>
+    <input type="password" id="password" name="password" required autocomplete="current-password">
+
+    <button type="submit">Entrar</button>
+  </form>
+  {% else %}
+  <p class="hint">Nenhum administrador cadastrado ainda. No servidor, crie o administrador principal com:</p>
+  <pre class="admin-link-box" style="word-break:normal;white-space:pre-wrap;">docker compose exec web python scripts/manage.py lc-main-admin SEU_USUARIO</pre>
+  {% endif %}
+  <p class="hint" style="margin-top:1.25rem;"><a href="/">← Voltar ao início</a></p>
+</div>
+{% endblock %}

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}{{ "Editar leitura coletiva" if lc else "Nova leitura coletiva" }}{% endblock %}
+{% block content %}
+<div class="card lc-form">
+  <p class="hint"><a href="/adminlc">← Voltar ao painel</a></p>
+  <h1>{{ "Editar leitura coletiva" if lc else "Nova leitura coletiva" }}</h1>
+
+  {% if errors %}<div class="warning-box">{% for e in errors %}{{ e }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+
+  <form method="post" enctype="multipart/form-data"
+        action="{{ '/adminlc/lc/' ~ lc.id ~ '/edit' if lc else '/adminlc/lc/new' }}" autocomplete="off">
+
+    <label for="book-query">Buscar no Google Books (preenche título, autor, ISBN e capa)</label>
+    <div class="book-search-wrap">
+      <input type="text" id="book-query" placeholder="Digite o título ou autor..." autocomplete="off">
+      <div id="book-suggestions" class="book-suggestions" hidden></div>
+    </div>
+    <p class="hint" id="book-search-status">Opcional — dá para preencher tudo à mão e enviar a capa.</p>
+
+    <label for="title">Título</label>
+    <input type="text" id="title" name="title" value="{{ values.title }}" required maxlength="200">
+
+    <label for="author">Autor</label>
+    <input type="text" id="author" name="author" value="{{ values.author }}" maxlength="200">
+
+    <label for="isbn">ISBN</label>
+    <input type="text" id="isbn" name="isbn" value="{{ values.isbn }}" maxlength="20">
+
+    <label for="description">Descrição (opcional)</label>
+    <textarea id="description" name="description" rows="3" maxlength="4000">{{ values.description }}</textarea>
+
+    <label for="state">Estado</label>
+    <select id="state" name="state">
+      {% for key in ("planned", "ongoing", "done") %}
+      <option value="{{ key }}" {{ "selected" if values.state == key }}>{{ LC_STATE_LABELS[key] }}</option>
+      {% endfor %}
+    </select>
+    <p class="hint">Prevista vira “em andamento” sozinha quando a data de início chegar. Concluída é sempre marcada por você.</p>
+
+    <div id="schedule-block">
+      <label for="start_date">Início do cronograma</label>
+      <input type="date" id="start_date" name="start_date" value="{{ values.start_date }}">
+
+      <label for="end_date">Fim do cronograma (opcional)</label>
+      <input type="date" id="end_date" name="end_date" value="{{ values.end_date }}">
+
+      <label for="schedule_text">Etapas do cronograma (opcional, uma por linha)</label>
+      <textarea id="schedule_text" name="schedule_text" rows="5" maxlength="4000" placeholder="Semana 1 (01/12): capítulos 1 a 5&#10;Semana 2 (08/12): capítulos 6 a 10">{{ values.schedule_text }}</textarea>
+    </div>
+
+    <h2 style="margin-top:1.5rem;">Capa</h2>
+    {% if lc and lc.cover_src %}
+    <div class="book-preview" id="current-cover">
+      <img src="{{ lc.cover_src }}" alt="Capa atual" class="lc-form-cover">
+      <div>
+        <div class="title">Capa atual</div>
+        <label class="lc-check"><input type="checkbox" name="remove_cover" value="1" {{ "checked" if values.remove_cover }}> Remover capa</label>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="book-preview" id="google-cover-preview" hidden>
+      <img id="google-cover-img" alt="" class="lc-form-cover">
+      <div>
+        <div class="title">Capa do Google Books</div>
+        <div class="hint">Será baixada ao salvar. Se você enviar um arquivo abaixo, o arquivo tem prioridade.</div>
+      </div>
+    </div>
+    <input type="hidden" id="google_cover_url" name="google_cover_url" value="{{ values.google_cover_url }}">
+
+    <label for="cover_file">Ou enviar uma imagem (JPG, PNG, WEBP ou GIF, até 5 MB)</label>
+    <input type="file" id="cover_file" name="cover_file" accept="image/jpeg,image/png,image/webp,image/gif">
+
+    <div class="lc-actions">
+      <button type="submit">{{ "Salvar alterações" if lc else "Cadastrar leitura" }}</button>
+      <a class="btn secondary" href="/adminlc">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var state = document.getElementById('state');
+  var block = document.getElementById('schedule-block');
+  function syncSchedule() { block.hidden = state.value === 'done'; }
+  state.addEventListener('change', syncSchedule);
+  syncSchedule();
+
+  var query = document.getElementById('book-query');
+  var box = document.getElementById('book-suggestions');
+  var status = document.getElementById('book-search-status');
+  var coverUrl = document.getElementById('google_cover_url');
+  var preview = document.getElementById('google-cover-preview');
+  var previewImg = document.getElementById('google-cover-img');
+  var timer, controller;
+
+  function showCover(url) {
+    if (url) { previewImg.src = url; preview.hidden = false; } else { preview.hidden = true; }
+  }
+  showCover(coverUrl.value);
+
+  function pick(b) {
+    document.getElementById('title').value = b.title || '';
+    document.getElementById('author').value = b.author || '';
+    document.getElementById('isbn').value = b.isbn || '';
+    coverUrl.value = b.thumbnail || '';
+    showCover(b.thumbnail);
+    box.hidden = true;
+    query.value = '';
+    status.textContent = b.thumbnail ? 'Dados preenchidos. Confira e salve.' : 'Dados preenchidos (esse livro não tem capa no Google — envie uma imagem se quiser).';
+  }
+
+  function render(items) {
+    box.innerHTML = '';
+    if (!items || !items.length) {
+      box.hidden = true;
+      status.textContent = 'Nenhum resultado — preencha à mão.';
+      return;
+    }
+    items.forEach(function (b) {
+      var row = document.createElement('div');
+      row.className = 'book-suggestion';
+      var img = document.createElement('img');
+      img.className = 'book-thumb';
+      img.alt = '';
+      if (b.thumbnail) { img.src = b.thumbnail; } else { img.style.visibility = 'hidden'; }
+      var text = document.createElement('div');
+      var t = document.createElement('div');
+      t.className = 'title';
+      t.textContent = b.title;
+      text.appendChild(t);
+      if (b.author) {
+        var a = document.createElement('div');
+        a.className = 'author';
+        a.textContent = b.author;
+        text.appendChild(a);
+      }
+      row.appendChild(img);
+      row.appendChild(text);
+      row.addEventListener('mousedown', function (ev) { ev.preventDefault(); pick(b); });
+      box.appendChild(row);
+    });
+    box.hidden = false;
+    status.textContent = 'Escolha um resultado para preencher o formulário.';
+  }
+
+  query.addEventListener('input', function () {
+    clearTimeout(timer);
+    var q = query.value.trim();
+    if (q.length < 2) { box.hidden = true; return; }
+    timer = setTimeout(function () {
+      if (controller) controller.abort();
+      controller = new AbortController();
+      status.textContent = 'Buscando...';
+      fetch('/api/book-search?q=' + encodeURIComponent(q), { signal: controller.signal })
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(render)
+        .catch(function (e) { if (e.name !== 'AbortError') status.textContent = 'Busca indisponível — preencha à mão.'; });
+    }, 350);
+  });
+  query.addEventListener('blur', function () { setTimeout(function () { box.hidden = true; }, 150); });
+  query.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') ev.preventDefault(); });
+})();
+</script>
+{% endblock %}

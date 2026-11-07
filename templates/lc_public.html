@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_lc_macros.html" import lc_item with context %}
+{% block title %}{{ "Leituras coletivas concluídas" if mode == "done" else "Leituras coletivas" }}{% endblock %}
+{% block content %}
+<div class="card lc-card">
+  <p class="hint"><a href="/">← Voltar</a></p>
+
+  {% if mode == "done" %}
+  <h1>Leituras coletivas concluídas</h1>
+  {% if groups["done"] %}
+  <div class="lc-grid">
+    {% for r in groups["done"] %}{{ lc_item(r) }}{% endfor %}
+  </div>
+  {% else %}
+  <p class="hint">Nenhuma leitura concluída ainda.</p>
+  {% endif %}
+  <p class="hint" style="margin-top:1.5rem;"><a href="/lc">Ver leituras em andamento e próximas</a></p>
+
+  {% else %}
+  <h1>Em andamento</h1>
+  {% if groups["ongoing"] %}
+  <div class="lc-grid">
+    {% for r in groups["ongoing"] %}{{ lc_item(r) }}{% endfor %}
+  </div>
+  {% else %}
+  <p class="hint">Nenhuma leitura coletiva em andamento agora.</p>
+  {% endif %}
+
+  {% if groups["planned"] %}
+  <h2 class="lc-subhead">Próximas leituras</h2>
+  <div class="lc-grid">
+    {% for r in groups["planned"] %}{{ lc_item(r) }}{% endfor %}
+  </div>
+  {% endif %}
+
+  <p class="hint" style="margin-top:1.5rem;"><a href="/lc/concluidas">Ver leituras já concluídas</a></p>
+  {% endif %}
+</div>
+{% endblock %}

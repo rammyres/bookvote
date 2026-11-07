@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
     String,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -264,3 +265,60 @@ class RaffleDraw(Base):
     created_at = Column(DateTime, default=utcnow)
 
     raffle = relationship("Raffle", back_populates="draws")
+
+
+class LCAdmin(Base):
+    """Administrador da seção de Leituras Coletivas (/adminlc). Tem login
+    com usuário + senha, separado dos links secretos de enquete/sorteio.
+    `is_main` marca o administrador principal — o único que cria, desativa
+    e redefine a senha dos demais. Só existe um (criado via
+    scripts/manage.py)."""
+
+    __tablename__ = "lc_admins"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    username = Column(String, nullable=False, unique=True, index=True)
+    display_name = Column(String, nullable=True)
+    password_hash = Column(String, nullable=False)
+    is_main = Column(Boolean, default=False, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class CollectiveReading(Base):
+    """Uma Leitura Coletiva (LC). `state` é 'planned' (prevista), 'ongoing'
+    (em andamento) ou 'done' (concluída). Prevista vira em andamento
+    sozinha quando `start_date` chega (lc_logic.sync_reading_states); a
+    conclusão é sempre manual. Concluídas não precisam de cronograma."""
+
+    __tablename__ = "collective_readings"
+
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
+    title = Column(String, nullable=False)
+    author = Column(String, nullable=True)
+    isbn = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+
+    state = Column(String, nullable=False, default="planned", index=True)
+
+    # cronograma: período + texto livre com as etapas (ex.: uma por linha)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    schedule_text = Column(Text, nullable=True)
+
+    # capa: arquivo salvo em disco (upload do admin ou baixado do Google
+    # Books) tem prioridade; cover_url é só o fallback quando o download
+    # do Google falhou.
+    cover_filename = Column(String, nullable=True)
+    cover_url = Column(String, nullable=True)
+
+    created_by = Column(String, nullable=True)  # LCAdmin.id (sem FK de propósito)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    @property
+    def cover_src(self):
+        if self.cover_filename:
+            return f"/media/lc/{self.cover_filename}"
+        return self.cover_url or None
+

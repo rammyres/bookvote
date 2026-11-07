@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Administradores das LCs{% endblock %}
+{% block content %}
+<div class="card lc-form">
+  <p class="hint"><a href="/adminlc">← Voltar ao painel</a></p>
+  <h1>{{ "Administradores" if admin.is_main else "Minha senha" }}</h1>
+  {% if msg %}<div class="notice-box">{{ msg }}</div>{% endif %}
+
+  <h2>Alterar minha senha</h2>
+  {% if error and error_for == "me" %}<div class="warning-box">{{ error }}</div>{% endif %}
+  <form method="post" action="/adminlc/account/password">
+    <label for="current_password">Senha atual</label>
+    <input type="password" id="current_password" name="current_password" required autocomplete="current-password">
+    <label for="new_password">Nova senha (mínimo 10 caracteres)</label>
+    <input type="password" id="new_password" name="new_password" required minlength="10" autocomplete="new-password">
+    <label for="confirm_password">Repita a nova senha</label>
+    <input type="password" id="confirm_password" name="confirm_password" required minlength="10" autocomplete="new-password">
+    <button type="submit">Alterar senha</button>
+  </form>
+</div>
+
+{% if admin.is_main %}
+<div class="card lc-form">
+  <h2>Novo administrador</h2>
+  <p class="hint">Defina uma senha inicial e passe para a pessoa — ela pode trocá-la depois em “Minha senha”. Administradores cadastram e editam leituras, mas não criam outros administradores.</p>
+  {% if error and error_for == "new" %}<div class="warning-box">{{ error }}</div>{% endif %}
+  <form method="post" action="/adminlc/admins/new">
+    <label for="new-username">Usuário</label>
+    <input type="text" id="new-username" name="username" required maxlength="32" autocapitalize="none" autocomplete="off">
+    <label for="new-display">Nome (opcional)</label>
+    <input type="text" id="new-display" name="display_name" maxlength="80">
+    <label for="new-password">Senha inicial (mínimo 10 caracteres)</label>
+    <input type="password" id="new-password" name="password" required minlength="10" autocomplete="new-password">
+    <button type="submit">Criar administrador</button>
+  </form>
+</div>
+
+<div class="card lc-form">
+  <h2>Administradores cadastrados ({{ admins|length }})</h2>
+  <ul class="book-list">
+    {% for a in admins %}
+    <li class="lc-admin-user">
+      <div>
+        <span class="title">{{ a.display_name or a.username }}</span>
+        <span class="isbn">@{{ a.username }}</span>
+        {% if a.is_main %}<span class="lc-state lc-state-ongoing">principal</span>{% elif not a.active %}<span class="lc-state lc-state-done">desativado</span>{% endif %}
+      </div>
+      {% if not a.is_main %}
+      {% if error and error_for == a.id %}<div class="warning-box">{{ error }}</div>{% endif %}
+      <div class="lc-actions">
+        <form method="post" action="/adminlc/admins/{{ a.id }}/toggle"><button type="submit" class="secondary">{{ "Desativar" if a.active else "Reativar" }}</button></form>
+        <form method="post" action="/adminlc/admins/{{ a.id }}/password" class="lc-inline-form">
+          <input type="password" name="password" required minlength="10" placeholder="Nova senha" autocomplete="new-password" aria-label="Nova senha para {{ a.username }}">
+          <button type="submit" class="secondary">Redefinir senha</button>
+        </form>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

@@ -25,6 +25,8 @@ from .database import Base, SessionLocal, engine, get_db, ensure_column
 from .models import Book, Poll, Vote, VoterIdentity, Raffle, RaffleEntry, gen_short_id
 from . import poll_logic as pl
 from . import raffle_logic as rl
+from . import lc_logic as lcl
+from .lc_routes import build_router as build_lc_router
 from .book_search import search_books
 from .email_sender import send_email
 from .security import get_or_set_voter_id, hash_ip, verify_captcha, TURNSTILE_SITE_KEY, CAPTCHA_ENABLED
@@ -158,6 +160,9 @@ app = FastAPI(title="Enquete de Livros")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+# capas das Leituras Coletivas (uploads/baixadas do Google) — ficam no volume de dados
+app.mount("/media/lc", StaticFiles(directory=lcl.COVERS_DIR), name="lc_covers")
+app.include_router(build_lc_router(templates, limiter))
 
 MAX_VOTER_IDENTITIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_VOTERS_PER_IP", "6"))
 MAX_RAFFLE_ENTRIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_RAFFLE_ENTRIES_PER_IP", "6"))
@@ -523,8 +528,11 @@ async def run_pending_notifications() -> None:
 # ---------------------------------------------------------------- home / create
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
+def home(request: Request, db: Session = Depends(get_db)):
+    # grouped_readings já promove prevista → em andamento quando o início chegou
+    return templates.TemplateResponse(
+        "home.html", {"request": request, "lc_groups": lcl.grouped_readings(db)}
+    )
 
 
 @app.get("/new", response_class=HTMLResponse)

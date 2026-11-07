@@ -12,11 +12,14 @@ Uso (dentro do container, via docker compose):
   docker compose exec bookvote python scripts/manage.py list-raffles
   docker compose exec bookvote python scripts/manage.py delete-poll <id>
   docker compose exec bookvote python scripts/manage.py delete-raffle <id>
+  docker compose exec bookvote python scripts/manage.py lc-main-admin <usuario>
+  docker compose exec bookvote python scripts/manage.py list-lc-admins
 
 Fora do Docker (rodando local com o mesmo BOOKVOTE_DATA_DIR do servidor),
 funciona igual, direto com `python scripts/manage.py ...`.
 """
 import argparse
+import getpass
 import os
 import sys
 
@@ -25,8 +28,9 @@ import sys
 # scripts/) no sys.path antes de importar `app`.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import SessionLocal  # noqa: E402
-from app.models import Book, DrawLog, Poll, Raffle, RaffleDraw, RaffleEntry, Vote, VoterIdentity  # noqa: E402
+from app.database import Base, SessionLocal, engine  # noqa: E402
+from app.models import Book, DrawLog, LCAdmin, Poll, Raffle, RaffleDraw, RaffleEntry, Vote, VoterIdentity  # noqa: E402
+from app import lc_logic as lcl  # noqa: E402
 from app import poll_logic as pl  # noqa: E402
 from app import raffle_logic as rl  # noqa: E402
 
@@ -132,6 +136,63 @@ def delete_raffle(args: argparse.Namespace) -> None:
         db.close()
 
 
+def list_lc_admins(args: argparse.Namespace) -> None:
+    Base.metadata.create_all(bind=engine)  # cria só o que falta (ex.: base anterior às LCs)
+    db = SessionLocal()
+    try:
+        admins = db.query(LCAdmin).order_by(LCAdmin.is_main.desc(), LCAdmin.created_at.asc()).all()
+        if not admins:
+            print("Nenhum administrador de LC cadastrado. Crie o principal com: lc-main-admin <usuario>")
+            return
+        print(f"{'USUÁRIO':<24} {'PAPEL':<10} {'ATIVO':<6} {'CRIADO EM':<17} NOME")
+        for a in admins:
+            papel = "principal" if a.is_main else "admin"
+            print(f"{a.username:<24} {papel:<10} {'sim' if a.active else 'não':<6} {_fmt_dt(a.created_at):<17} {a.display_name or ''}")
+    finally:
+        db.close()
+
+
+def lc_main_admin(args: argparse.Namespace) -> None:
+    """Cria o administrador principal das LCs ou, se esse usuário já for o
+    principal, redefine a senha dele (recuperação de acesso)."""
+    username = args.username.strip().lower()
+    if not lcl.valid_username(username):
+        print("Usuário inválido: 3 a 32 caracteres, só letras minúsculas, números, ponto, hífen e sublinhado.")
+        sys.exit(1)
+
+    Base.metadata.create_all(bind=engine)  # cria só o que falta (ex.: base anterior às LCs)
+    db = SessionLocal()
+    try:
+        main = db.query(LCAdmin).filter(LCAdmin.is_main.is_(True)).first()
+        if main and main.username != username:
+            print(f"Já existe um administrador principal ('{main.username}'). Só pode haver um.")
+            print(f"Para redefinir a senha dele: lc-main-admin {main.username}")
+            sys.exit(1)
+
+        password = getpass.getpass(f"Senha para '{username}' (mínimo {lcl.MIN_PASSWORD_LEN} caracteres): ")
+        if len(password) < lcl.MIN_PASSWORD_LEN:
+            print(f"Senha curta demais (mínimo {lcl.MIN_PASSWORD_LEN}).")
+            sys.exit(1)
+        if getpass.getpass("Repita a senha: ") != password:
+            print("As senhas não conferem.")
+            sys.exit(1)
+
+        if main:
+            main.password_hash = lcl.hash_password(password)
+            main.active = True
+            db.commit()
+            print(f"Senha do administrador principal '{username}' redefinida.")
+            return
+
+        if db.query(LCAdmin).filter(LCAdmin.username == username).first():
+            print(f"O usuário '{username}' já existe como administrador comum. Escolha outro nome para o principal.")
+            sys.exit(1)
+        lcl.create_admin(db, username, password, is_main=True)
+        print(f"Administrador principal '{username}' criado. Acesse /adminlc para entrar.")
+    finally:
+        db.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -148,6 +209,17 @@ def main() -> None:
     p_del_raffle.add_argument("raffle_id")
     p_del_raffle.add_argument("--yes", action="store_true", help="Pula a confirmação interativa")
     p_del_raffle.set_defaults(func=delete_raffle)
+
+    sub.add_parser("list-lc-admins", help="Lista os administradores das Leituras Coletivas").set_defaults(
+        func=list_lc_admins
+    )
+
+    p_lc_main = sub.add_parser(
+        "lc-main-admin",
+        help="Cria o administrador principal das Leituras Coletivas (ou redefine a senha dele)",
+    )
+    p_lc_main.add_argument("username")
+    p_lc_main.set_defaults(func=lc_main_admin)
 
     args = parser.parse_args()
     args.func(args)

@@ -64,6 +64,43 @@ numa única instância pequena (Docker + nginx na frente).
 - Leitura em voz alta depende do navegador ter voz em pt-BR instalada;
   sem isso, a leitura visual/texto continua funcionando normalmente.
 
+## Leituras coletivas (LC)
+
+Vitrine de leituras coletivas do clube, com as **capas em destaque**.
+
+- **Home**: no topo, a seção "Leituras coletivas em andamento" (só capas,
+  clicáveis), as "Em breve" (previstas) logo abaixo e o botão
+  "Leituras já concluídas" (`/lc/concluidas`). Também há `/lc` (andamento +
+  próximas) e `/lc/<id>` (capa grande, cronograma e descrição).
+- **Estados**: *prevista*, *em andamento* e *concluída*. Prevista vira
+  em andamento **sozinha** quando a data de início chega (virada à meia-noite
+  do fuso `BOOKVOTE_TZ`, padrão `America/Sao_Paulo`; vale na próxima página
+  que alguém abrir, sem cron). Concluir é sempre manual, pelo painel.
+  Concluídas não precisam de cronograma.
+- **Cronograma**: data de início (obrigatória para prevista/em andamento),
+  data de fim e etapas em texto livre.
+- **Capa**: busca no Google Books (preenche título, autor, ISBN e capa) ou
+  upload de JPG/PNG/WEBP/GIF até 5 MB. A capa do Google é **baixada para o
+  servidor** (`/data/lc_covers`, mesmo volume do banco) — se o download
+  falhar, o app usa o link do Google como reserva. Se o admin enviar um
+  arquivo, ele tem prioridade.
+- **Administração** (`/adminlc`): login com usuário e senha (mín. 10
+  caracteres). O **administrador principal** cria/desativa outros
+  administradores e redefine a senha deles; todos os administradores
+  cadastram, editam, concluem e apagam leituras.
+
+Primeiro acesso — crie o administrador principal no servidor (pede a senha
+sem ecoar; rodar de novo com o mesmo usuário redefine a senha dele):
+
+```bash
+docker compose exec web python scripts/manage.py lc-main-admin SEU_USUARIO
+docker compose exec web python scripts/manage.py list-lc-admins
+```
+
+Upload de capa atrás do nginx precisa de `client_max_body_size` (já no
+`deploy/nginx-bookvote.conf` de exemplo; se você já copiou o arquivo antes,
+adicione `client_max_body_size 6m;` no `server` e recarregue o nginx).
+
 ## Notificações automáticas de mudança de fase
 
 As enquetes disparam e-mail pro organizador quando: as indicações
@@ -240,6 +277,9 @@ Dados ficam no volume Docker `bookvote_data` (SQLite):
 ```bash
 docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
   cp /data/bookvote.db /backup/bookvote-backup.db
+# capas das leituras coletivas (se houver):
+docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
+  tar czf /backup/lc_covers-backup.tgz -C /data lc_covers
 ```
 
 ### Atualizando depois de mudar o código
