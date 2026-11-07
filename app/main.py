@@ -121,6 +121,7 @@ ensure_column("raffle_entries", "added_by_admin", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "rejection_reason", "VARCHAR")
 ensure_column("raffles", "cancelled", "BOOLEAN DEFAULT 0")
+ensure_column("collective_readings", "category", "VARCHAR")
 
 
 def _fix_over_promoted_polls() -> None:
@@ -531,7 +532,12 @@ async def run_pending_notifications() -> None:
 def home(request: Request, db: Session = Depends(get_db)):
     # grouped_readings já promove prevista → em andamento quando o início chegou
     return templates.TemplateResponse(
-        "home.html", {"request": request, "lc_groups": lcl.grouped_readings(db)}
+        "home.html",
+        {
+            "request": request,
+            "lc_groups": lcl.grouped_readings(db),
+            "lc_group_mode": lcl.get_group_mode(db),
+        },
     )
 
 

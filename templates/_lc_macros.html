@@ -8,7 +8,7 @@
 
 {% macro lc_when(lc) %}
 {%- if lc.state == "planned" -%}
-  {%- if lc.start_date %}Começa em {{ lc.start_date|br_date }}{% else %}Em breve{% endif -%}
+  {%- if lc.start_date %}Começa em {{ lc.start_date|br_date }}{% else %}Data a definir{% endif -%}
 {%- elif lc.state == "ongoing" -%}
   {%- if lc.end_date %}Até {{ lc.end_date|br_date }}{% elif lc.start_date %}Desde {{ lc.start_date|br_date }}{% else %}Em andamento{% endif -%}
 {%- else -%}
@@ -24,4 +24,15 @@
   {% set when %}{{ lc_when(lc) }}{% endset %}
   {% if when|trim %}<span class="lc-item-when">{{ when|trim }}</span>{% endif %}
 </a>
+{% endmacro %}
+
+{# Grade de leituras, agrupada (categoria/autor) conforme o modo escolhido
+   pelo admin principal; modo "none" = uma grade só, como antes. #}
+{% macro lc_sections(readings, mode, small=False) %}
+{% for label, items in group_readings(readings, mode) %}
+{% if label %}<h3 class="lc-group-head">{{ label }}</h3>{% endif %}
+<div class="lc-grid{{ ' lc-grid-small' if small }}">
+  {% for r in items %}{{ lc_item(r) }}{% endfor %}
+</div>
+{% endfor %}
 {% endmacro %}

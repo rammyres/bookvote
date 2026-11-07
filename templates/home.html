@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Enquete de Livros{% endblock %}
 {% block content %}
-{% from "_lc_macros.html" import lc_item with context %}
+{% from "_lc_macros.html" import lc_sections with context %}
 {% set ongoing = lc_groups["ongoing"] %}
 {% set planned = lc_groups["planned"] %}
 {% set done = lc_groups["done"] %}
@@ -9,18 +9,14 @@
 <section class="card landing-card lc-card">
   <h1>Leituras coletivas em andamento</h1>
   {% if ongoing %}
-  <div class="lc-grid">
-    {% for r in ongoing %}{{ lc_item(r) }}{% endfor %}
-  </div>
+  {{ lc_sections(ongoing, lc_group_mode) }}
   {% else %}
   <p class="poll-desc">Nenhuma leitura coletiva em andamento agora.</p>
   {% endif %}
 
   {% if planned %}
   <h2 class="lc-subhead">Em breve</h2>
-  <div class="lc-grid lc-grid-small">
-    {% for r in planned %}{{ lc_item(r) }}{% endfor %}
-  </div>
+  {{ lc_sections(planned, lc_group_mode, small=True) }}
   {% endif %}
 
   {% if done %}
@@ -59,4 +55,5 @@
     <a class="btn secondary" href="/raffles?status=closed">Ver sorteios encerrados</a>
   </div>
 </div>
+
 {% endblock %}

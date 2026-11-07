@@ -11,10 +11,12 @@
       <span class="lc-state lc-state-{{ lc.state }}">{{ LC_STATE_LABELS[lc.state] }}</span>
       <h1>{{ lc.title }}</h1>
       {% if lc.author %}<p class="poll-desc">{{ lc.author }}</p>{% endif %}
+      {% if lc.category %}<p class="lc-category">{{ lc.category }}</p>{% endif %}
 
       {% if lc.state != "done" %}
       <div class="meta-row">
-        {% if lc.start_date %}<span>Início: <strong>{{ lc.start_date|br_date }}</strong></span>{% endif %}
+        {% if lc.start_date %}<span>Início: <strong>{{ lc.start_date|br_date }}</strong></span>
+        {% elif lc.state == "planned" %}<span>Início: <strong>data a definir</strong></span>{% endif %}
         {% if lc.end_date %}<span>Fim: <strong>{{ lc.end_date|br_date }}</strong></span>{% endif %}
       </div>
       {% elif lc.start_date and lc.end_date %}

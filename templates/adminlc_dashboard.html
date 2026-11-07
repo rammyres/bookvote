@@ -12,6 +12,7 @@
   <div class="book-row-text">
     <a href="/lc/{{ r.id }}" class="title" style="text-decoration:underline;">{{ r.title }}</a>
     {% if r.author %}<br><span class="author">{{ r.author }}</span>{% endif %}
+    {% if r.category %}<br><span class="lc-category">{{ r.category }}</span>{% endif %}
     {% set when %}{{ lc_when(r) }}{% endset %}
     {% if when|trim %}<br><span class="isbn">{{ when|trim }}</span>{% endif %}
     {% if r.state == "ongoing" and r.end_date and r.end_date < today %}
@@ -19,7 +20,9 @@
     {% endif %}
     <div class="lc-actions">
       <a class="btn secondary" href="/adminlc/lc/{{ r.id }}/edit">Editar</a>
-      {% if r.state == "ongoing" %}
+      {% if r.state == "planned" %}
+      <form method="post" action="/adminlc/lc/{{ r.id }}/state"><input type="hidden" name="state" value="ongoing"><button type="submit" class="secondary">Iniciar agora</button></form>
+      {% elif r.state == "ongoing" %}
       <form method="post" action="/adminlc/lc/{{ r.id }}/state"><input type="hidden" name="state" value="done"><button type="submit" class="secondary">Marcar como concluída</button></form>
       {% elif r.state == "done" %}
       <form method="post" action="/adminlc/lc/{{ r.id }}/state"><input type="hidden" name="state" value="ongoing"><button type="submit" class="secondary">Reabrir</button></form>
@@ -42,11 +45,24 @@
     <form method="post" action="/adminlc/logout"><button type="submit" class="secondary">Sair</button></form>
   </div>
   {% if msg %}<div class="notice-box">{{ msg }}</div>{% endif %}
+  {% if admin.is_main %}
+  <form method="post" action="/adminlc/grouping" class="lc-inline-form" style="margin-top:1rem;">
+    <label for="group_by" style="margin:0;">Agrupar leituras no site:</label>
+    <select id="group_by" name="group_by" style="width:auto;">
+      {% for key, label in LC_GROUP_LABELS.items() %}
+      <option value="{{ key }}" {{ "selected" if group_mode == key }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="secondary">Aplicar</button>
+  </form>
+  {% else %}
+  <p class="hint" style="margin-top:1rem;">Agrupamento no site: {{ LC_GROUP_LABELS[group_mode] }} (definido pelo administrador principal).</p>
+  {% endif %}
 </div>
 
 {% for key, title, empty in (
   ("ongoing", "Em andamento", "Nenhuma leitura em andamento."),
-  ("planned", "Previstas", "Nenhuma leitura prevista. Quando a data de início chegar, ela passa sozinha para \"em andamento\"."),
+  ("planned", "Previstas", "Nenhuma leitura prevista. Quando a data de início chegar, ela passa sozinha para \"em andamento\" (sem data, use \"Iniciar agora\")."),
   ("done", "Concluídas", "Nenhuma leitura concluída.")) %}
 <div class="card lc-form">
   <h2>{{ title }} ({{ groups[key]|length }})</h2>

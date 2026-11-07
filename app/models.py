@@ -299,9 +299,15 @@ class CollectiveReading(Base):
     isbn = Column(String, nullable=True)
     description = Column(Text, nullable=True)
 
+    # categoria livre (ex.: "Fantasia", "Cosmere"); opcional. Serve para
+    # agrupar as leituras na home quando o admin principal escolhe isso.
+    category = Column(String, nullable=True, index=True)
+
     state = Column(String, nullable=False, default="planned", index=True)
 
-    # cronograma: período + texto livre com as etapas (ex.: uma por linha)
+    # cronograma: período + texto livre com as etapas (ex.: uma por linha).
+    # Prevista pode ficar sem start_date ("data a definir"): nesse caso ela
+    # não vira "em andamento" sozinha — o admin inicia manualmente.
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     schedule_text = Column(Text, nullable=True)
@@ -322,3 +328,13 @@ class CollectiveReading(Base):
             return f"/media/lc/{self.cover_filename}"
         return self.cover_url or None
 
+
+
+class SiteSetting(Base):
+    """Configuração simples chave/valor do site. Hoje só guarda
+    `lc_group_by` (como a lista de leituras coletivas é agrupada)."""
+
+    __tablename__ = "site_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False, default="")

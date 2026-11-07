@@ -817,3 +817,18 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 
 .lc-form [hidden] { display: none !important; }  /* .book-preview (display:flex) vencia o atributo hidden */
 .lc-form h1 { margin-bottom: 1rem; }
+
+/* agrupamento das leituras coletivas (categoria/autor) */
+.lc-group-head {
+  margin: 1.75rem 0 0;
+  text-align: center;
+  font-size: 1.05rem;
+}
+.lc-group-head + .lc-grid { margin-top: 0.75rem; }
+.lc-category {
+  margin: 0.25rem 0 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft, inherit);
+}

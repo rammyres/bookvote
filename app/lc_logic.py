@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import secrets
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
@@ -19,7 +20,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from .database import DATA_DIR
-from .models import CollectiveReading, LCAdmin
+from .models import CollectiveReading, LCAdmin, SiteSetting
 from .security import SECRET_KEY
 
 logger = logging.getLogger("bookvote.lc")
@@ -89,6 +90,74 @@ def grouped_readings(db: Session) -> dict[str, list[CollectiveReading]]:
         reverse=True,
     )
     return out
+
+
+# ---------------------------------------------------------------- agrupamento
+
+GROUP_NONE = "none"
+GROUP_CATEGORY = "category"
+GROUP_AUTHOR = "author"
+GROUP_MODES = (GROUP_NONE, GROUP_CATEGORY, GROUP_AUTHOR)
+GROUP_LABELS = {
+    GROUP_NONE: "Sem agrupamento",
+    GROUP_CATEGORY: "Por categoria",
+    GROUP_AUTHOR: "Por autor",
+}
+_GROUP_SETTING_KEY = "lc_group_by"
+_NO_CATEGORY_LABEL = "Sem categoria"
+_NO_AUTHOR_LABEL = "Sem autor"
+MAX_CATEGORY_LEN = 80
+
+
+def get_group_mode(db: Session) -> str:
+    row = db.query(SiteSetting).filter(SiteSetting.key == _GROUP_SETTING_KEY).first()
+    return row.value if row and row.value in GROUP_MODES else GROUP_NONE
+
+
+def set_group_mode(db: Session, mode: str) -> None:
+    if mode not in GROUP_MODES:
+        raise ValueError(mode)
+    row = db.query(SiteSetting).filter(SiteSetting.key == _GROUP_SETTING_KEY).first()
+    if row:
+        row.value = mode
+    else:
+        db.add(SiteSetting(key=_GROUP_SETTING_KEY, value=mode))
+    db.commit()
+
+
+def _fold(text: str) -> str:
+    """Chave de agrupamento/ordenação sem acento nem caixa ('Ágata' = 'agata')."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c)
+    )
+
+
+def group_readings(readings, mode: str) -> list[tuple[Optional[str], list]]:
+    """Divide uma lista (já ordenada) em [(rótulo, leituras)]. Sem
+    agrupamento devolve um único grupo de rótulo None. Grupos em ordem
+    alfabética (sem acento/caixa); 'Sem categoria'/'Sem autor' por último.
+    Dentro de cada grupo mantém a ordem original da lista."""
+    readings = list(readings)
+    if mode not in (GROUP_CATEGORY, GROUP_AUTHOR):
+        return [(None, readings)] if readings else []
+    attr, empty_label = (
+        ("category", _NO_CATEGORY_LABEL) if mode == GROUP_CATEGORY else ("author", _NO_AUTHOR_LABEL)
+    )
+    buckets: dict[str, tuple[str, list]] = {}
+    for r in readings:
+        label = (getattr(r, attr) or "").strip()
+        key = _fold(label)
+        buckets.setdefault(key, (label, []))[1].append(r)
+    empty = buckets.pop("", None)
+    out = [(label or empty_label, items) for _, (label, items) in sorted(buckets.items())]
+    if empty:
+        out.append((empty_label, empty[1]))
+    return out
+
+
+def known_categories(db: Session) -> list[str]:
+    rows = db.query(CollectiveReading.category).filter(CollectiveReading.category.isnot(None)).distinct().all()
+    return sorted({c.strip() for (c,) in rows if c and c.strip()}, key=_fold)
 
 
 # ------------------------------------------------------------------- senhas

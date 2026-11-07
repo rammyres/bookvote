@@ -18,6 +18,7 @@ MSGS = {
     "updated": "Leitura atualizada.",
     "deleted": "Leitura apagada.",
     "state": "Estado atualizado.",
+    "grouping": "Agrupamento atualizado.",
     "cover_fallback": "Leitura salva, mas não consegui baixar a capa do Google — usando o link direto dela por enquanto.",
     "admin_created": "Administrador criado.",
     "admin_toggled": "Administrador atualizado.",
@@ -39,6 +40,8 @@ def build_router(templates, limiter) -> APIRouter:
     router = APIRouter()
     templates.env.filters["br_date"] = br_date
     templates.env.globals["LC_STATE_LABELS"] = lc.STATE_LABELS
+    templates.env.globals["LC_GROUP_LABELS"] = lc.GROUP_LABELS
+    templates.env.globals["group_readings"] = lc.group_readings
 
     # ------------------------------------------------------------ dependências
 
@@ -68,12 +71,12 @@ def build_router(templates, limiter) -> APIRouter:
     @router.get("/lc", response_class=HTMLResponse)
     def public_list(request: Request, db: Session = Depends(get_db)):
         groups = lc.grouped_readings(db)
-        return render(request, "lc_public.html", groups=groups, mode="all")
+        return render(request, "lc_public.html", groups=groups, mode="all", group_mode=lc.get_group_mode(db))
 
     @router.get("/lc/concluidas", response_class=HTMLResponse)
     def public_done(request: Request, db: Session = Depends(get_db)):
         groups = lc.grouped_readings(db)
-        return render(request, "lc_public.html", groups=groups, mode="done")
+        return render(request, "lc_public.html", groups=groups, mode="done", group_mode=lc.get_group_mode(db))
 
     @router.get("/lc/{reading_id}", response_class=HTMLResponse)
     def public_detail(request: Request, reading_id: str, db: Session = Depends(get_db)):
@@ -98,6 +101,7 @@ def build_router(templates, limiter) -> APIRouter:
         return render(
             request, "adminlc_dashboard.html",
             admin=admin, groups=groups, today=lc.local_today(),
+            group_mode=lc.get_group_mode(db),
         )
 
     @router.post("/adminlc/login")
@@ -127,7 +131,7 @@ def build_router(templates, limiter) -> APIRouter:
 
     # ---------------------------------------------------- cadastro de leituras
 
-    FIELDS = ("title", "author", "isbn", "description", "state", "start_date", "end_date",
+    FIELDS = ("title", "author", "isbn", "description", "category", "state", "start_date", "end_date",
               "schedule_text", "google_cover_url")
 
     def _form_values(form) -> dict:
@@ -146,6 +150,7 @@ def build_router(templates, limiter) -> APIRouter:
             errors.append("Informe o título.")
         for field, label, limit in (
             ("title", "Título", 200), ("author", "Autor", 200), ("isbn", "ISBN", 20),
+            ("category", "Categoria", lc.MAX_CATEGORY_LEN),
             ("description", "Descrição", 4000), ("schedule_text", "Cronograma", 4000),
         ):
             if len(v[field]) > limit:
@@ -158,8 +163,10 @@ def build_router(templates, limiter) -> APIRouter:
             except ValueError:
                 parsed[key] = None
                 errors.append(f"Data de {label} inválida.")
-        if v["state"] in (lc.STATE_PLANNED, lc.STATE_ONGOING) and not parsed.get("start_date") and not errors:
-            errors.append("Informe a data de início do cronograma.")
+        # Prevista pode ficar sem data ("data a definir"); em andamento precisa
+        # de início (é o que a home mostra como "Desde ...").
+        if v["state"] == lc.STATE_ONGOING and not parsed.get("start_date") and not errors:
+            errors.append("Informe a data de início — ou deixe a leitura como Prevista, sem data.")
         if parsed.get("start_date") and parsed.get("end_date") and parsed["end_date"] < parsed["start_date"]:
             errors.append("A data de fim não pode ser anterior à de início.")
         return errors, parsed
@@ -205,6 +212,7 @@ def build_router(templates, limiter) -> APIRouter:
             return render(
                 request, "adminlc_form.html", status_code=400,
                 admin=admin, lc=reading, values=v, errors=errors,
+                categories=lc.known_categories(db),
             )
 
         creating = reading is None
@@ -214,6 +222,7 @@ def build_router(templates, limiter) -> APIRouter:
         reading.title = v["title"]
         reading.author = v["author"] or None
         reading.isbn = v["isbn"] or None
+        reading.category = v["category"] or None
         reading.description = v["description"] or None
         reading.state = v["state"]
         reading.start_date = parsed["start_date"]
@@ -227,11 +236,16 @@ def build_router(templates, limiter) -> APIRouter:
         return go("/adminlc", notice or ("created" if creating else "updated"))
 
     @router.get("/adminlc/lc/new", response_class=HTMLResponse)
-    def new_reading_form(request: Request, admin: LCAdmin = Depends(require_admin)):
+    def new_reading_form(
+        request: Request, admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db)
+    ):
         values = {f: "" for f in FIELDS}
         values["state"] = lc.STATE_PLANNED
         values["remove_cover"] = False
-        return render(request, "adminlc_form.html", admin=admin, lc=None, values=values, errors=[])
+        return render(
+            request, "adminlc_form.html", admin=admin, lc=None, values=values, errors=[],
+            categories=lc.known_categories(db),
+        )
 
     @router.post("/adminlc/lc/new")
     @limiter.limit("30/minute")
@@ -255,12 +269,15 @@ def build_router(templates, limiter) -> APIRouter:
         r = _get_reading(db, reading_id)
         values = {
             "title": r.title, "author": r.author or "", "isbn": r.isbn or "",
-            "description": r.description or "", "state": r.state,
+            "description": r.description or "", "category": r.category or "", "state": r.state,
             "start_date": r.start_date.isoformat() if r.start_date else "",
             "end_date": r.end_date.isoformat() if r.end_date else "",
             "schedule_text": r.schedule_text or "", "google_cover_url": "", "remove_cover": False,
         }
-        return render(request, "adminlc_form.html", admin=admin, lc=r, values=values, errors=[])
+        return render(
+            request, "adminlc_form.html", admin=admin, lc=r, values=values, errors=[],
+            categories=lc.known_categories(db),
+        )
 
     @router.post("/adminlc/lc/{reading_id}/edit")
     @limiter.limit("30/minute")
@@ -277,13 +294,27 @@ def build_router(templates, limiter) -> APIRouter:
     ):
         form = await request.form()
         new_state = str(form.get("state", ""))
-        # atalhos do painel: concluir (ongoing→done) e reabrir (done→ongoing)
+        # atalhos do painel: iniciar (planned→ongoing), concluir (ongoing→done)
+        # e reabrir (done→ongoing)
         if new_state not in (lc.STATE_DONE, lc.STATE_ONGOING):
             raise HTTPException(status_code=400, detail="Estado inválido.")
         r = _get_reading(db, reading_id)
+        if new_state == lc.STATE_ONGOING and not r.start_date:
+            r.start_date = lc.local_today()  # prevista sem data: o início é hoje
         r.state = new_state
         db.commit()
         return go("/adminlc", "state")
+
+    @router.post("/adminlc/grouping")
+    async def set_grouping(
+        request: Request, admin: LCAdmin = Depends(require_main), db: Session = Depends(get_db)
+    ):
+        form = await request.form()
+        mode = str(form.get("group_by", ""))
+        if mode not in lc.GROUP_MODES:
+            raise HTTPException(status_code=400, detail="Agrupamento inválido.")
+        lc.set_group_mode(db, mode)
+        return go("/adminlc", "grouping")
 
     @router.post("/adminlc/lc/{reading_id}/delete")
     def delete_reading(

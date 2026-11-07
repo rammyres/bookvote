@@ -77,8 +77,18 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   do fuso `BOOKVOTE_TZ`, padrão `America/Sao_Paulo`; vale na próxima página
   que alguém abrir, sem cron). Concluir é sempre manual, pelo painel.
   Concluídas não precisam de cronograma.
-- **Cronograma**: data de início (obrigatória para prevista/em andamento),
-  data de fim e etapas em texto livre.
+- **Cronograma**: data de início, data de fim e etapas em texto livre. A
+  data de início é obrigatória para *em andamento*; uma leitura *prevista*
+  pode ficar **sem data** ("data a definir") e não vira em andamento
+  sozinha — o admin usa o botão "Iniciar agora" no painel (o início passa a
+  ser a data de hoje).
+- **Categoria** (opcional, texto livre, com sugestão das já usadas) e
+  **agrupamento**: o **administrador principal** escolhe no painel
+  (`/adminlc`) se a home e `/lc` mostram as leituras sem agrupar, **por
+  categoria** ou **por autor**. Vale para todas as seções (em andamento,
+  em breve, concluídas); grupos em ordem alfabética, "Sem categoria"/"Sem
+  autor" por último. O banco ganha a coluna `category` e a tabela
+  `site_settings` sozinhos na primeira subida (sem migração manual).
 - **Capa**: busca no Google Books (preenche título, autor, ISBN e capa) ou
   upload de JPG/PNG/WEBP/GIF até 5 MB. A capa do Google é **baixada para o
   servidor** (`/data/lc_covers`, mesmo volume do banco) — se o download
