@@ -10,7 +10,7 @@
   <h1>Leituras coletivas em andamento</h1>
   {% if ongoing %}
   {% set featured, rest = split_featured(ongoing) %}
-  {% for r in featured %}{{ lc_featured(r) }}{% endfor %}
+  {% if featured %}<div class="lc-grid">{% for r in featured %}{{ lc_featured(r) }}{% endfor %}</div>{% endif %}
   {% if rest %}{{ lc_sections(rest, lc_group_mode) }}{% endif %}
   {% else %}
   <p class="poll-desc">Nenhuma leitura coletiva em andamento agora.</p>
@@ -28,14 +28,6 @@
   {% endif %}
 </section>
 {% endif %}
-
-<div class="card landing-card">
-  <h1>Cosmere</h1>
-  <p class="poll-desc">Não sabe por onde começar no universo de Brandon Sanderson? Confira a ordem de leitura.</p>
-  <div class="landing-actions">
-    <a class="btn" href="https://cosmere-reading-order.pages.dev/" target="_blank" rel="noopener noreferrer">Ordem de leitura da Cosmere</a>
-  </div>
-</div>
 
 <div class="card landing-card">
   <h1>Enquete de Livros</h1>
@@ -58,4 +50,11 @@
   </div>
 </div>
 
+<div class="card landing-card">
+  <h1>Cosmere</h1>
+  <p class="poll-desc">Não sabe por onde começar no universo de Brandon Sanderson? Confira a ordem de leitura.</p>
+  <div class="landing-actions">
+    <a class="btn" href="https://cosmere-reading-order.pages.dev/" target="_blank" rel="noopener noreferrer">Ordem de leitura da Cosmere</a>
+  </div>
+</div>
 {% endblock %}

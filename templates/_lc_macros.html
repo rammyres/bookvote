@@ -26,19 +26,16 @@
 </a>
 {% endmacro %}
 
-{# Destaque da página inicial: leitura em andamento da categoria "Leitura principal" #}
+{# Destaque da página inicial: leitura em andamento da categoria "Leitura principal".
+   Mesmo card das demais, só um pouco maior. #}
 {% macro lc_featured(lc) %}
-<a class="lc-featured" href="/lc/{{ lc.id }}">
-  <div class="lc-featured-cover">{{ lc_cover(lc) }}</div>
-  <div class="lc-featured-info">
-    <span class="lc-featured-tag">★ {{ lc.category.name }}</span>
-    <span class="lc-featured-title">{{ lc.title }}</span>
-    {% if lc.author %}<span class="lc-featured-author">{{ lc.author }}</span>{% endif %}
-    {% set when %}{{ lc_when(lc) }}{% endset %}
-    {% if when|trim %}<span class="lc-item-when">{{ when|trim }}</span>{% endif %}
-    {% if lc.description %}<span class="lc-featured-desc">{{ lc.description|truncate(240) }}</span>{% endif %}
-    <span class="lc-featured-cta">Ver detalhes e cronograma →</span>
-  </div>
+<a class="lc-item lc-item-featured" href="/lc/{{ lc.id }}">
+  {{ lc_cover(lc) }}
+  <span class="lc-featured-tag">★ {{ lc.category.name }}</span>
+  <span class="lc-item-title">{{ lc.title }}</span>
+  {% if lc.author %}<span class="lc-item-author">{{ lc.author }}</span>{% endif %}
+  {% set when %}{{ lc_when(lc) }}{% endset %}
+  {% if when|trim %}<span class="lc-item-when">{{ when|trim }}</span>{% endif %}
 </a>
 {% endmacro %}
 
