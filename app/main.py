@@ -121,7 +121,7 @@ ensure_column("raffle_entries", "added_by_admin", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("raffle_entries", "rejection_reason", "VARCHAR")
 ensure_column("raffles", "cancelled", "BOOLEAN DEFAULT 0")
-ensure_column("collective_readings", "category", "VARCHAR")
+ensure_column("collective_readings", "category_id", "VARCHAR")
 
 
 def _fix_over_promoted_polls() -> None:

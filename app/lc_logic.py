@@ -20,7 +20,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from .database import DATA_DIR
-from .models import CollectiveReading, LCAdmin, SiteSetting
+from .models import CollectiveReading, LCAdmin, LCCategory, SiteSetting
 from .security import SECRET_KEY
 
 logger = logging.getLogger("bookvote.lc")
@@ -103,26 +103,62 @@ GROUP_LABELS = {
     GROUP_CATEGORY: "Por categoria",
     GROUP_AUTHOR: "Por autor",
 }
+# Páginas onde o agrupamento pode valer: "main" = página principal (home e
+# /lc); "done" = leituras concluídas (/lc/concluidas).
+PAGE_MAIN = "main"
+PAGE_DONE = "done"
+GROUP_PAGES = (PAGE_MAIN, PAGE_DONE)
+GROUP_PAGE_LABELS = {
+    PAGE_MAIN: "Página principal (home e lista de leituras)",
+    PAGE_DONE: "Leituras concluídas",
+}
 _GROUP_SETTING_KEY = "lc_group_by"
+_GROUP_PAGES_KEY = "lc_group_pages"
 _NO_CATEGORY_LABEL = "Sem categoria"
 _NO_AUTHOR_LABEL = "Sem autor"
-MAX_CATEGORY_LEN = 80
+MAX_CATEGORY_LEN = 60
+
+
+def _get_setting(db: Session, key: str) -> Optional[str]:
+    row = db.query(SiteSetting).filter(SiteSetting.key == key).first()
+    return row.value if row else None
+
+
+def _put_setting(db: Session, key: str, value: str) -> None:
+    row = db.query(SiteSetting).filter(SiteSetting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(SiteSetting(key=key, value=value))
 
 
 def get_group_mode(db: Session) -> str:
-    row = db.query(SiteSetting).filter(SiteSetting.key == _GROUP_SETTING_KEY).first()
-    return row.value if row and row.value in GROUP_MODES else GROUP_NONE
+    value = _get_setting(db, _GROUP_SETTING_KEY)
+    return value if value in GROUP_MODES else GROUP_NONE
 
 
-def set_group_mode(db: Session, mode: str) -> None:
+def get_group_pages(db: Session) -> list[str]:
+    """Páginas com agrupamento. Sem configuração salva = todas; valor vazio
+    salvo = nenhuma (o admin desmarcou tudo)."""
+    value = _get_setting(db, _GROUP_PAGES_KEY)
+    if value is None:
+        return list(GROUP_PAGES)
+    return [p for p in value.split(",") if p in GROUP_PAGES]
+
+
+def save_group_settings(db: Session, mode: str, pages) -> None:
     if mode not in GROUP_MODES:
         raise ValueError(mode)
-    row = db.query(SiteSetting).filter(SiteSetting.key == _GROUP_SETTING_KEY).first()
-    if row:
-        row.value = mode
-    else:
-        db.add(SiteSetting(key=_GROUP_SETTING_KEY, value=mode))
+    chosen = [p for p in GROUP_PAGES if p in set(pages)]
+    _put_setting(db, _GROUP_SETTING_KEY, mode)
+    _put_setting(db, _GROUP_PAGES_KEY, ",".join(chosen))
     db.commit()
+
+
+def group_mode_for(db: Session, page: str) -> str:
+    """Modo de agrupamento efetivo de uma página ('none' se ela não foi
+    marcada pelo admin principal)."""
+    return get_group_mode(db) if page in get_group_pages(db) else GROUP_NONE
 
 
 def _fold(text: str) -> str:
@@ -130,6 +166,13 @@ def _fold(text: str) -> str:
     return "".join(
         c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c)
     )
+
+
+def _group_label(reading, mode: str) -> str:
+    if mode == GROUP_CATEGORY:
+        cat = getattr(reading, "category", None)
+        return (cat.name if cat else "").strip()
+    return (getattr(reading, "author", None) or "").strip()
 
 
 def group_readings(readings, mode: str) -> list[tuple[Optional[str], list]]:
@@ -140,24 +183,46 @@ def group_readings(readings, mode: str) -> list[tuple[Optional[str], list]]:
     readings = list(readings)
     if mode not in (GROUP_CATEGORY, GROUP_AUTHOR):
         return [(None, readings)] if readings else []
-    attr, empty_label = (
-        ("category", _NO_CATEGORY_LABEL) if mode == GROUP_CATEGORY else ("author", _NO_AUTHOR_LABEL)
-    )
+    empty_label = _NO_CATEGORY_LABEL if mode == GROUP_CATEGORY else _NO_AUTHOR_LABEL
     buckets: dict[str, tuple[str, list]] = {}
     for r in readings:
-        label = (getattr(r, attr) or "").strip()
-        key = _fold(label)
-        buckets.setdefault(key, (label, []))[1].append(r)
+        label = _group_label(r, mode)
+        buckets.setdefault(_fold(label), (label, []))[1].append(r)
     empty = buckets.pop("", None)
-    out = [(label or empty_label, items) for _, (label, items) in sorted(buckets.items())]
+    out = [(label, items) for _, (label, items) in sorted(buckets.items())]
     if empty:
         out.append((empty_label, empty[1]))
     return out
 
 
-def known_categories(db: Session) -> list[str]:
-    rows = db.query(CollectiveReading.category).filter(CollectiveReading.category.isnot(None)).distinct().all()
-    return sorted({c.strip() for (c,) in rows if c and c.strip()}, key=_fold)
+# ---------------------------------------------------------------- categorias
+
+def list_categories(db: Session) -> list[LCCategory]:
+    return sorted(db.query(LCCategory).all(), key=lambda c: _fold(c.name))
+
+
+def category_counts(db: Session) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for (cid,) in db.query(CollectiveReading.category_id).filter(CollectiveReading.category_id.isnot(None)).all():
+        counts[cid] = counts.get(cid, 0) + 1
+    return counts
+
+
+def category_name_taken(db: Session, name: str, exclude_id: Optional[str] = None) -> bool:
+    key = _fold(name.strip())
+    return any(_fold(c.name) == key and c.id != exclude_id for c in db.query(LCCategory).all())
+
+
+def delete_category(db: Session, category: LCCategory) -> int:
+    """Apaga a categoria e solta as leituras dela (ficam sem categoria)."""
+    n = (
+        db.query(CollectiveReading)
+        .filter(CollectiveReading.category_id == category.id)
+        .update({CollectiveReading.category_id: None}, synchronize_session=False)
+    )
+    db.delete(category)
+    db.commit()
+    return n
 
 
 # ------------------------------------------------------------------- senhas

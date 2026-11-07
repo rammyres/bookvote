@@ -26,9 +26,18 @@
     <label for="isbn">ISBN</label>
     <input type="text" id="isbn" name="isbn" value="{{ values.isbn }}" maxlength="20">
 
-    <label for="category">Categoria (opcional)</label>
-    <input type="text" id="category" name="category" value="{{ values.category }}" maxlength="80" list="category-list" placeholder="Ex.: Fantasia, Ficção científica, Clássicos">
-    <datalist id="category-list">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
+    <label for="category_id">Categoria (opcional)</label>
+    <select id="category_id" name="category_id">
+      <option value="">— Sem categoria —</option>
+      {% for c in categories %}
+      <option value="{{ c.id }}" {{ "selected" if values.category_id == c.id }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <p class="hint">
+      {% if admin.is_main %}Falta uma? <a href="/adminlc/categorias">Cadastre em Categorias</a> e volte aqui (salve esta leitura antes, para não perder o que digitou).
+      {% elif not categories %}Ainda não há categorias cadastradas — peça ao administrador principal.
+      {% else %}As categorias são cadastradas pelo administrador principal.{% endif %}
+    </p>
 
     <label for="description">Descrição (opcional)</label>
     <textarea id="description" name="description" rows="3" maxlength="4000">{{ values.description }}</textarea>

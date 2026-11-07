@@ -11,7 +11,7 @@ from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
 from .database import get_db
-from .models import CollectiveReading, LCAdmin
+from .models import CollectiveReading, LCAdmin, LCCategory
 
 MSGS = {
     "created": "Leitura cadastrada.",
@@ -19,6 +19,9 @@ MSGS = {
     "deleted": "Leitura apagada.",
     "state": "Estado atualizado.",
     "grouping": "Agrupamento atualizado.",
+    "category_created": "Categoria criada.",
+    "category_renamed": "Categoria renomeada.",
+    "category_deleted": "Categoria apagada. As leituras dela ficaram sem categoria.",
     "cover_fallback": "Leitura salva, mas não consegui baixar a capa do Google — usando o link direto dela por enquanto.",
     "admin_created": "Administrador criado.",
     "admin_toggled": "Administrador atualizado.",
@@ -41,6 +44,8 @@ def build_router(templates, limiter) -> APIRouter:
     templates.env.filters["br_date"] = br_date
     templates.env.globals["LC_STATE_LABELS"] = lc.STATE_LABELS
     templates.env.globals["LC_GROUP_LABELS"] = lc.GROUP_LABELS
+    templates.env.globals["LC_GROUP_PAGES"] = lc.GROUP_PAGES
+    templates.env.globals["LC_GROUP_PAGE_LABELS"] = lc.GROUP_PAGE_LABELS
     templates.env.globals["group_readings"] = lc.group_readings
 
     # ------------------------------------------------------------ dependências
@@ -71,12 +76,12 @@ def build_router(templates, limiter) -> APIRouter:
     @router.get("/lc", response_class=HTMLResponse)
     def public_list(request: Request, db: Session = Depends(get_db)):
         groups = lc.grouped_readings(db)
-        return render(request, "lc_public.html", groups=groups, mode="all", group_mode=lc.get_group_mode(db))
+        return render(request, "lc_public.html", groups=groups, mode="all", group_mode=lc.group_mode_for(db, lc.PAGE_MAIN))
 
     @router.get("/lc/concluidas", response_class=HTMLResponse)
     def public_done(request: Request, db: Session = Depends(get_db)):
         groups = lc.grouped_readings(db)
-        return render(request, "lc_public.html", groups=groups, mode="done", group_mode=lc.get_group_mode(db))
+        return render(request, "lc_public.html", groups=groups, mode="done", group_mode=lc.group_mode_for(db, lc.PAGE_DONE))
 
     @router.get("/lc/{reading_id}", response_class=HTMLResponse)
     def public_detail(request: Request, reading_id: str, db: Session = Depends(get_db)):
@@ -101,7 +106,7 @@ def build_router(templates, limiter) -> APIRouter:
         return render(
             request, "adminlc_dashboard.html",
             admin=admin, groups=groups, today=lc.local_today(),
-            group_mode=lc.get_group_mode(db),
+            group_mode=lc.get_group_mode(db), group_pages=lc.get_group_pages(db),
         )
 
     @router.post("/adminlc/login")
@@ -131,7 +136,7 @@ def build_router(templates, limiter) -> APIRouter:
 
     # ---------------------------------------------------- cadastro de leituras
 
-    FIELDS = ("title", "author", "isbn", "description", "category", "state", "start_date", "end_date",
+    FIELDS = ("title", "author", "isbn", "description", "category_id", "state", "start_date", "end_date",
               "schedule_text", "google_cover_url")
 
     def _form_values(form) -> dict:
@@ -150,7 +155,6 @@ def build_router(templates, limiter) -> APIRouter:
             errors.append("Informe o título.")
         for field, label, limit in (
             ("title", "Título", 200), ("author", "Autor", 200), ("isbn", "ISBN", 20),
-            ("category", "Categoria", lc.MAX_CATEGORY_LEN),
             ("description", "Descrição", 4000), ("schedule_text", "Cronograma", 4000),
         ):
             if len(v[field]) > limit:
@@ -203,6 +207,8 @@ def build_router(templates, limiter) -> APIRouter:
         form = await request.form()
         v = _form_values(form)
         errors, parsed = _validate(v)
+        if v["category_id"] and not db.query(LCCategory).filter(LCCategory.id == v["category_id"]).first():
+            errors.append("Categoria inválida — escolha uma da lista.")
         cover_file, cover_url, old_file, cover_err, notice = (None, None, None, None, None)
         if not errors:
             cover_file, cover_url, old_file, cover_err, notice = await _apply_cover(form, v, reading)
@@ -212,7 +218,7 @@ def build_router(templates, limiter) -> APIRouter:
             return render(
                 request, "adminlc_form.html", status_code=400,
                 admin=admin, lc=reading, values=v, errors=errors,
-                categories=lc.known_categories(db),
+                categories=lc.list_categories(db),
             )
 
         creating = reading is None
@@ -222,7 +228,7 @@ def build_router(templates, limiter) -> APIRouter:
         reading.title = v["title"]
         reading.author = v["author"] or None
         reading.isbn = v["isbn"] or None
-        reading.category = v["category"] or None
+        reading.category_id = v["category_id"] or None
         reading.description = v["description"] or None
         reading.state = v["state"]
         reading.start_date = parsed["start_date"]
@@ -244,7 +250,7 @@ def build_router(templates, limiter) -> APIRouter:
         values["remove_cover"] = False
         return render(
             request, "adminlc_form.html", admin=admin, lc=None, values=values, errors=[],
-            categories=lc.known_categories(db),
+            categories=lc.list_categories(db),
         )
 
     @router.post("/adminlc/lc/new")
@@ -269,14 +275,14 @@ def build_router(templates, limiter) -> APIRouter:
         r = _get_reading(db, reading_id)
         values = {
             "title": r.title, "author": r.author or "", "isbn": r.isbn or "",
-            "description": r.description or "", "category": r.category or "", "state": r.state,
+            "description": r.description or "", "category_id": r.category_id or "", "state": r.state,
             "start_date": r.start_date.isoformat() if r.start_date else "",
             "end_date": r.end_date.isoformat() if r.end_date else "",
             "schedule_text": r.schedule_text or "", "google_cover_url": "", "remove_cover": False,
         }
         return render(
             request, "adminlc_form.html", admin=admin, lc=r, values=values, errors=[],
-            categories=lc.known_categories(db),
+            categories=lc.list_categories(db),
         )
 
     @router.post("/adminlc/lc/{reading_id}/edit")
@@ -313,8 +319,80 @@ def build_router(templates, limiter) -> APIRouter:
         mode = str(form.get("group_by", ""))
         if mode not in lc.GROUP_MODES:
             raise HTTPException(status_code=400, detail="Agrupamento inválido.")
-        lc.set_group_mode(db, mode)
+        pages = [str(p) for p in form.getlist("group_pages")]
+        if any(p not in lc.GROUP_PAGES for p in pages):
+            raise HTTPException(status_code=400, detail="Página inválida.")
+        lc.save_group_settings(db, mode, pages)
         return go("/adminlc", "grouping")
+
+    # ------------------------------------------------------------- categorias
+    # Só o administrador principal cria/renomeia/apaga categorias; todos os
+    # administradores escolhem entre elas ao cadastrar/editar uma leitura.
+
+    def _categories_page(request: Request, db: Session, admin: LCAdmin, error=None, error_for=None, status_code=200):
+        return render(
+            request, "adminlc_categories.html", status_code=status_code,
+            admin=admin, categories=lc.list_categories(db), counts=lc.category_counts(db),
+            error=error, error_for=error_for,
+        )
+
+    def _clean_category_name(raw) -> str:
+        return " ".join(str(raw or "").split())
+
+    @router.get("/adminlc/categorias", response_class=HTMLResponse)
+    def categories_page(
+        request: Request, admin: LCAdmin = Depends(require_main), db: Session = Depends(get_db)
+    ):
+        return _categories_page(request, db, admin)
+
+    @router.post("/adminlc/categorias/new")
+    @limiter.limit("30/minute")
+    async def create_category(
+        request: Request, admin: LCAdmin = Depends(require_main), db: Session = Depends(get_db)
+    ):
+        form = await request.form()
+        name = _clean_category_name(form.get("name"))
+        if not name:
+            return _categories_page(request, db, admin, "Informe o nome da categoria.", "new", 400)
+        if len(name) > lc.MAX_CATEGORY_LEN:
+            return _categories_page(request, db, admin, f"O nome passa de {lc.MAX_CATEGORY_LEN} caracteres.", "new", 400)
+        if lc.category_name_taken(db, name):
+            return _categories_page(request, db, admin, "Já existe uma categoria com esse nome.", "new", 400)
+        db.add(LCCategory(name=name))
+        db.commit()
+        return go("/adminlc/categorias", "category_created")
+
+    def _get_category(db: Session, category_id: str) -> LCCategory:
+        c = db.query(LCCategory).filter(LCCategory.id == category_id).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Categoria não encontrada.")
+        return c
+
+    @router.post("/adminlc/categorias/{category_id}/rename")
+    @limiter.limit("30/minute")
+    async def rename_category(
+        request: Request, category_id: str,
+        admin: LCAdmin = Depends(require_main), db: Session = Depends(get_db),
+    ):
+        cat = _get_category(db, category_id)
+        form = await request.form()
+        name = _clean_category_name(form.get("name"))
+        if not name:
+            return _categories_page(request, db, admin, "Informe o nome da categoria.", cat.id, 400)
+        if len(name) > lc.MAX_CATEGORY_LEN:
+            return _categories_page(request, db, admin, f"O nome passa de {lc.MAX_CATEGORY_LEN} caracteres.", cat.id, 400)
+        if lc.category_name_taken(db, name, exclude_id=cat.id):
+            return _categories_page(request, db, admin, "Já existe uma categoria com esse nome.", cat.id, 400)
+        cat.name = name
+        db.commit()
+        return go("/adminlc/categorias", "category_renamed")
+
+    @router.post("/adminlc/categorias/{category_id}/delete")
+    def delete_category(
+        category_id: str, admin: LCAdmin = Depends(require_main), db: Session = Depends(get_db)
+    ):
+        lc.delete_category(db, _get_category(db, category_id))
+        return go("/adminlc/categorias", "category_deleted")
 
     @router.post("/adminlc/lc/{reading_id}/delete")
     def delete_reading(

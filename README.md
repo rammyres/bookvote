@@ -82,13 +82,18 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   pode ficar **sem data** ("data a definir") e não vira em andamento
   sozinha — o admin usa o botão "Iniciar agora" no painel (o início passa a
   ser a data de hoje).
-- **Categoria** (opcional, texto livre, com sugestão das já usadas) e
-  **agrupamento**: o **administrador principal** escolhe no painel
-  (`/adminlc`) se a home e `/lc` mostram as leituras sem agrupar, **por
-  categoria** ou **por autor**. Vale para todas as seções (em andamento,
-  em breve, concluídas); grupos em ordem alfabética, "Sem categoria"/"Sem
-  autor" por último. O banco ganha a coluna `category` e a tabela
-  `site_settings` sozinhos na primeira subida (sem migração manual).
+- **Categorias**: o **administrador principal** cadastra previamente as
+  categorias em `/adminlc/categorias` (criar, renomear, apagar — apagar solta
+  as leituras, que ficam "sem categoria"). Ao cadastrar/editar uma leitura,
+  qualquer administrador escolhe uma delas numa lista (ou nenhuma).
+- **Agrupamento**: no painel (`/adminlc`) o administrador principal escolhe
+  o modo — sem agrupamento, **por categoria** ou **por autor** — e **em quais
+  páginas** vale: página principal (home e `/lc`), leituras concluídas
+  (`/lc/concluidas`), as duas ou nenhuma. Grupos em ordem alfabética,
+  "Sem categoria"/"Sem autor" por último. Sem configuração salva, o
+  agrupamento (quando ligado) vale nas duas. O banco ganha a coluna
+  `category_id` e as tabelas `lc_categories` e `site_settings` sozinhos na
+  primeira subida (sem migração manual).
 - **Capa**: busca no Google Books (preenche título, autor, ISBN e capa) ou
   upload de JPG/PNG/WEBP/GIF até 5 MB. A capa do Google é **baixada para o
   servidor** (`/data/lc_covers`, mesmo volume do banco) — se o download

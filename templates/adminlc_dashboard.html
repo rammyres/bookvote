@@ -12,7 +12,7 @@
   <div class="book-row-text">
     <a href="/lc/{{ r.id }}" class="title" style="text-decoration:underline;">{{ r.title }}</a>
     {% if r.author %}<br><span class="author">{{ r.author }}</span>{% endif %}
-    {% if r.category %}<br><span class="lc-category">{{ r.category }}</span>{% endif %}
+    {% if r.category %}<br><span class="lc-category">{{ r.category.name }}</span>{% endif %}
     {% set when %}{{ lc_when(r) }}{% endset %}
     {% if when|trim %}<br><span class="isbn">{{ when|trim }}</span>{% endif %}
     {% if r.state == "ongoing" and r.end_date and r.end_date < today %}
@@ -40,6 +40,7 @@
   </div>
   <div class="lc-actions">
     <a class="btn" href="/adminlc/lc/new">Nova leitura coletiva</a>
+    {% if admin.is_main %}<a class="btn secondary" href="/adminlc/categorias">Categorias</a>{% endif %}
     <a class="btn secondary" href="/adminlc/admins">{{ "Administradores" if admin.is_main else "Minha senha" }}</a>
     <a class="btn secondary" href="/">Ver o site</a>
     <form method="post" action="/adminlc/logout"><button type="submit" class="secondary">Sair</button></form>
@@ -53,10 +54,18 @@
       <option value="{{ key }}" {{ "selected" if group_mode == key }}>{{ label }}</option>
       {% endfor %}
     </select>
+    <span class="lc-inline-form">
+      {% for p in LC_GROUP_PAGES %}
+      <label class="lc-check" style="margin:0;"><input type="checkbox" name="group_pages" value="{{ p }}" {{ "checked" if p in group_pages }}> {{ LC_GROUP_PAGE_LABELS[p] }}</label>
+      {% endfor %}
+    </span>
     <button type="submit" class="secondary">Aplicar</button>
   </form>
   {% else %}
-  <p class="hint" style="margin-top:1rem;">Agrupamento no site: {{ LC_GROUP_LABELS[group_mode] }} (definido pelo administrador principal).</p>
+  <p class="hint" style="margin-top:1rem;">
+    Agrupamento no site (definido pelo administrador principal):
+    {{ LC_GROUP_LABELS[group_mode] }}{% if group_mode != "none" %} — {% if group_pages %}{% for p in group_pages %}{{ LC_GROUP_PAGE_LABELS[p]|lower }}{{ ", " if not loop.last }}{% endfor %}{% else %}em nenhuma página{% endif %}{% endif %}.
+  </p>
   {% endif %}
 </div>
 

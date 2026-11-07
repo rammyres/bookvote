@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Categorias das leituras coletivas{% endblock %}
+{% block content %}
+<div class="card lc-form">
+  <p class="hint"><a href="/adminlc">← Voltar ao painel</a></p>
+  <h1>Categorias</h1>
+  <p class="hint">Cadastre as categorias aqui; ao criar ou editar uma leitura, o administrador escolhe uma delas. Para o site agrupar as leituras por categoria, use “Agrupar leituras no site” no painel.</p>
+  {% if msg %}<div class="notice-box">{{ msg }}</div>{% endif %}
+
+  <h2>Nova categoria</h2>
+  {% if error and error_for == "new" %}<div class="warning-box">{{ error }}</div>{% endif %}
+  <form method="post" action="/adminlc/categorias/new" class="lc-inline-form">
+    <input type="text" name="name" required maxlength="60" placeholder="Ex.: Fantasia" aria-label="Nome da nova categoria" autocomplete="off">
+    <button type="submit">Criar categoria</button>
+  </form>
+</div>
+
+<div class="card lc-form">
+  <h2>Categorias cadastradas ({{ categories|length }})</h2>
+  {% if categories %}
+  <ul class="book-list">
+    {% for c in categories %}
+    <li class="lc-admin-user">
+      <div>
+        <span class="title">{{ c.name }}</span>
+        <span class="isbn">{{ counts.get(c.id, 0) }} leitura{{ "" if counts.get(c.id, 0) == 1 else "s" }}</span>
+      </div>
+      {% if error and error_for == c.id %}<div class="warning-box">{{ error }}</div>{% endif %}
+      <div class="lc-actions">
+        <form method="post" action="/adminlc/categorias/{{ c.id }}/rename" class="lc-inline-form">
+          <input type="text" name="name" required maxlength="60" value="{{ c.name }}" aria-label="Novo nome para {{ c.name }}" autocomplete="off">
+          <button type="submit" class="secondary">Renomear</button>
+        </form>
+        <form method="post" action="/adminlc/categorias/{{ c.id }}/delete" onsubmit="return confirm('Apagar a categoria &quot;{{ c.name|e }}&quot;? As {{ counts.get(c.id, 0) }} leitura(s) dela ficam sem categoria.');"><button type="submit" class="secondary danger">Apagar</button></form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">Nenhuma categoria ainda.</p>
+  {% endif %}
+</div>
+{% endblock %}

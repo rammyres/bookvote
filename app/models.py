@@ -285,6 +285,18 @@ class LCAdmin(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class LCCategory(Base):
+    """Categoria de leitura coletiva (ex.: "Fantasia", "Cosmere"). Criada
+    antes pelo administrador principal; o formulário da LC só escolhe entre
+    as existentes."""
+
+    __tablename__ = "lc_categories"
+
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
+    name = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
 class CollectiveReading(Base):
     """Uma Leitura Coletiva (LC). `state` é 'planned' (prevista), 'ongoing'
     (em andamento) ou 'done' (concluída). Prevista vira em andamento
@@ -299,9 +311,12 @@ class CollectiveReading(Base):
     isbn = Column(String, nullable=True)
     description = Column(Text, nullable=True)
 
-    # categoria livre (ex.: "Fantasia", "Cosmere"); opcional. Serve para
-    # agrupar as leituras na home quando o admin principal escolhe isso.
-    category = Column(String, nullable=True, index=True)
+    # categoria escolhida entre as previamente cadastradas (LCCategory);
+    # opcional. Serve para agrupar as leituras quando o admin principal
+    # escolhe isso. (Em bancos antigos a coluna é adicionada sem a FK; o
+    # ORM funciona igual, e apagar categoria zera category_id na mão.)
+    category_id = Column(String, ForeignKey("lc_categories.id"), nullable=True, index=True)
+    category = relationship("LCCategory", lazy="joined")
 
     state = Column(String, nullable=False, default="planned", index=True)
 
