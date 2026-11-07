@@ -536,7 +536,7 @@ def home(request: Request, db: Session = Depends(get_db)):
         {
             "request": request,
             "lc_groups": lcl.grouped_readings(db),
-            "lc_group_mode": lcl.get_group_mode(db),
+            "lc_group_mode": lcl.group_mode_for(db, lcl.PAGE_MAIN),
         },
     )
 
