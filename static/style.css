@@ -851,3 +851,33 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
   border-radius: 2px;
 }
 .lc-item-featured .lc-featured-tag + .lc-item-title { margin-top: 0.35rem; }
+
+/* botão flutuante do WhatsApp */
+.whatsapp-float {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.1rem 0.7rem 0.9rem;
+  background: #25D366;
+  color: #fff;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.whatsapp-float:hover { background: #1ebe5b; transform: translateY(-2px); box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45); }
+.whatsapp-float:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.whatsapp-float svg { flex: none; }
+/* espaço no rodapé para o botão não cobrir o texto final */
+.site-footer { padding-bottom: 5rem; }
+@media (max-width: 480px) {
+  .whatsapp-float { right: 0.75rem; bottom: 0.75rem; padding: 0.6rem 0.9rem 0.6rem 0.75rem; font-size: 0.9rem; }
+}
+@media print { .whatsapp-float { display: none; } }
