@@ -124,11 +124,13 @@ async def parse_schedule_image(data: bytes, mime: str, reference: Optional[date]
         }],
         "generationConfig": {
             "temperature": 0,
+            # sem "raciocínio" interno: a extração é direta e fica bem mais rápida
+            "thinkingConfig": {"thinkingBudget": 0},
             "responseMimeType": "application/json",
             "responseSchema": SCHEMA,
         },
     }
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
         try:
             resp = await client.post(
                 GEMINI_URL.format(model=GEMINI_MODEL),
@@ -141,7 +143,9 @@ async def parse_schedule_image(data: bytes, mime: str, reference: Optional[date]
             logger.warning("Gemini retornou %s: %s", exc.response.status_code, exc.response.text[:300])
             raise ScheduleParseError("O serviço de leitura da imagem recusou o pedido. Tente de novo ou preencha à mão.")
         except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Falha ao chamar o Gemini: %s", exc)
+            logger.warning("Falha ao chamar o Gemini: %s %r", type(exc).__name__, exc)
+            if isinstance(exc, httpx.TimeoutException):
+                raise ScheduleParseError("A leitura da imagem demorou demais. Tente de novo em instantes.")
             raise ScheduleParseError("Não consegui falar com o serviço de leitura da imagem. Preencha à mão.")
 
     try:
