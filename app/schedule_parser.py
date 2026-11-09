@@ -21,6 +21,10 @@ def _clean_env(raw: str) -> str:
 
 GEMINI_API_KEY = _clean_env(os.environ.get("GEMINI_API_KEY", ""))
 GEMINI_MODEL = _clean_env(os.environ.get("GEMINI_MODEL", "")) or "gemini-3.8-flash"
+_fb = _clean_env(os.environ.get("GEMINI_FALLBACK_MODEL", ""))
+# Modelo de reserva se o principal falhar por demanda/instabilidade.
+# Vazio = gemini-2.5-flash; "none" desliga o fallback.
+GEMINI_FALLBACK_MODEL = "" if _fb.lower() == "none" else (_fb or "gemini-2.5-flash")
 THINKING_LEVEL = _clean_env(os.environ.get("GEMINI_THINKING_LEVEL", "")).lower() or "low"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
@@ -111,48 +115,77 @@ def resolve_years(weeks: list[dict], reference: Optional[date] = None, today: Op
     return out
 
 
-async def parse_schedule_image(data: bytes, mime: str, reference: Optional[date] = None) -> list[dict]:
-    if not CONFIGURED:
-        raise ScheduleParseError("Leitura automática não configurada (falta GEMINI_API_KEY).")
-    import base64
+def _generation_config(model: str) -> dict:
+    cfg = {"responseMimeType": "application/json", "responseSchema": SCHEMA}
+    if model.startswith("gemini-2"):
+        # família 2.x: orçamento de raciocínio numérico (0 = desligado)
+        cfg["temperature"] = 0
+        cfg["thinkingConfig"] = {"thinkingBudget": 0}
+    else:
+        # família 3.x+: nível de raciocínio; sem temperature (descontinuado)
+        cfg["thinkingConfig"] = {"thinkingLevel": THINKING_LEVEL}
+    return cfg
 
-    body = {
-        "contents": [{
-            "parts": [
-                {"text": PROMPT},
-                {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
-            ]
-        }],
-        "generationConfig": {
-            # extração direta de tabela: pouco raciocínio basta e fica mais rápido
-            "thinkingConfig": {"thinkingLevel": THINKING_LEVEL},
-            "responseMimeType": "application/json",
-            "responseSchema": SCHEMA,
-        },
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
-        try:
-            resp = await client.post(
-                GEMINI_URL.format(model=GEMINI_MODEL),
-                headers={"x-goog-api-key": GEMINI_API_KEY},
-                json=body,
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-        except httpx.HTTPStatusError as exc:
-            logger.warning("Gemini retornou %s: %s", exc.response.status_code, exc.response.text[:300])
-            raise ScheduleParseError("O serviço de leitura da imagem recusou o pedido. Tente de novo ou preencha à mão.")
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("Falha ao chamar o Gemini: %s %r", type(exc).__name__, exc)
-            if isinstance(exc, httpx.TimeoutException):
-                raise ScheduleParseError("A leitura da imagem demorou demais. Tente de novo em instantes.")
-            raise ScheduleParseError("Não consegui falar com o serviço de leitura da imagem. Preencha à mão.")
+
+class _Retryable(Exception):
+    """Falha que justifica tentar o modelo de reserva."""
+
+
+async def _call_model(client: httpx.AsyncClient, model: str, parts: list) -> list[dict]:
+    body = {"contents": [{"parts": parts}], "generationConfig": _generation_config(model)}
+    try:
+        resp = await client.post(
+            GEMINI_URL.format(model=model), headers={"x-goog-api-key": GEMINI_API_KEY}, json=body
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        logger.warning("Gemini (%s) retornou %s: %s", model, code, exc.response.text[:300])
+        if code in (408, 429, 500, 502, 503, 504):
+            raise _Retryable()
+        raise ScheduleParseError("O serviço de leitura da imagem recusou o pedido. Tente de novo ou preencha à mão.")
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Falha ao chamar o Gemini (%s): %s %r", model, type(exc).__name__, exc)
+        if isinstance(exc, httpx.HTTPError):  # timeout, conexão: vale tentar o reserva
+            raise _Retryable()
+        raise ScheduleParseError("Resposta inválida do serviço de leitura da imagem. Preencha à mão.")
 
     try:
         text = payload["candidates"][0]["content"]["parts"][0]["text"]
         weeks = json.loads(text).get("weeks") or []
     except (KeyError, IndexError, TypeError, ValueError):
-        raise ScheduleParseError("Não consegui interpretar a resposta sobre a imagem. Preencha à mão.")
+        logger.warning("Gemini (%s) devolveu resposta não interpretável: %s", model, str(payload)[:300])
+        raise _Retryable()
     if not weeks:
         raise ScheduleParseError("Não encontrei uma tabela de semanas nessa imagem.")
+    return weeks
+
+
+async def parse_schedule_image(data: bytes, mime: str, reference: Optional[date] = None) -> list[dict]:
+    if not CONFIGURED:
+        raise ScheduleParseError("Leitura automática não configurada (falta GEMINI_API_KEY).")
+    import base64
+
+    parts = [
+        {"text": PROMPT},
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}},
+    ]
+    models = [GEMINI_MODEL]
+    if GEMINI_FALLBACK_MODEL and GEMINI_FALLBACK_MODEL != GEMINI_MODEL:
+        models.append(GEMINI_FALLBACK_MODEL)
+
+    weeks = None
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
+        for n, model in enumerate(models):
+            try:
+                weeks = await _call_model(client, model, parts)
+                if n:
+                    logger.info("Cronograma lido com o modelo de reserva %s.", model)
+                break
+            except _Retryable:
+                if n + 1 < len(models):
+                    logger.warning("Falha com %s; tentando o modelo de reserva %s.", model, models[n + 1])
+    if weeks is None:
+        raise ScheduleParseError("O serviço de leitura da imagem está indisponível ou sobrecarregado. Tente em instantes ou preencha à mão.")
     return resolve_years(weeks, reference)
