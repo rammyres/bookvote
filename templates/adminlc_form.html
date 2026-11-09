@@ -80,6 +80,12 @@
       </div>
       {% endif %}
       <input type="file" id="schedule_image_file" name="schedule_image_file" accept="image/jpeg,image/png,image/webp,image/gif">
+      {% if schedule_ai_enabled %}
+      <div style="margin-top:.5rem;">
+        <button type="button" class="secondary" id="schedule-ai-btn">Preencher semanas a partir da imagem</button>
+        <p class="hint" id="schedule-ai-status">Lê a imagem escolhida acima e preenche o cronograma detalhado. Nada é salvo até você conferir e clicar em salvar.</p>
+      </div>
+      {% endif %}
 
       <h3 style="margin-top:1.5rem;">Cronograma detalhado (opcional)</h3>
       <p class="hint">Uma linha por semana: período e trecho a ler (número ou nome de capítulo). Com ele, a página da leitura mostra a tabela e uma barra de progresso que acompanha as semanas; sem ele, a barra segue o tempo entre início e fim. Se o início/fim do cronograma acima estiverem vazios, usamos o da primeira e o da última semana.</p>
@@ -224,6 +230,44 @@
       } else {
         row.remove();
       }
+    });
+  })();
+
+  // preenchimento do cronograma detalhado a partir da imagem
+  (function () {
+    var btn = document.getElementById('schedule-ai-btn');
+    if (!btn) return;
+    var fileInput = document.getElementById('schedule_image_file');
+    var status = document.getElementById('schedule-ai-status');
+    var rows = document.getElementById('stage-rows');
+    var tpl = document.getElementById('stage-template');
+    btn.addEventListener('click', function () {
+      var f = fileInput.files && fileInput.files[0];
+      if (!f) { status.textContent = 'Escolha primeiro a imagem do cronograma no campo acima.'; return; }
+      var fd = new FormData();
+      fd.append('image', f);
+      var start = document.getElementById('start_date').value;
+      if (start) fd.append('reference_date', start);
+      btn.disabled = true;
+      status.textContent = 'Lendo a imagem...';
+      fetch('/adminlc/api/parse-schedule', { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) { status.textContent = res.j.error || 'Não foi possível ler a imagem.'; return; }
+          var stages = res.j.stages || [];
+          rows.innerHTML = '';
+          stages.forEach(function (s) {
+            rows.appendChild(tpl.content.cloneNode(true));
+            var row = rows.lastElementChild;
+            row.querySelector('[name=stage_start]').value = s.start;
+            row.querySelector('[name=stage_end]').value = s.end;
+            row.querySelector('[name=stage_from]').value = s.from;
+            row.querySelector('[name=stage_to]').value = s.to;
+          });
+          status.textContent = stages.length + ' semanas preenchidas. Confira datas e capítulos antes de salvar.';
+        })
+        .catch(function () { status.textContent = 'Falha de conexão. Preencha à mão.'; })
+        .then(function () { btn.disabled = false; });
     });
   })();
 </script>

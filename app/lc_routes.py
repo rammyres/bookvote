@@ -5,11 +5,12 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
+from . import schedule_parser
 from .database import get_db
 from .models import CollectiveReading, LCAdmin, LCCategory, LCStage
 
@@ -48,6 +49,7 @@ def build_router(templates, limiter) -> APIRouter:
     templates.env.globals["LC_GROUP_PAGE_LABELS"] = lc.GROUP_PAGE_LABELS
     templates.env.globals["group_readings"] = lc.group_readings
     templates.env.globals["split_featured"] = lc.split_featured
+    templates.env.globals["schedule_ai_enabled"] = schedule_parser.CONFIGURED
 
     # ------------------------------------------------------------ dependências
 
@@ -352,6 +354,36 @@ def build_router(templates, limiter) -> APIRouter:
         request: Request, admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db)
     ):
         return await _save(request, db, admin, None)
+
+    SCHEDULE_IMG_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    SCHEDULE_IMG_MAX = 10 * 1024 * 1024
+
+    @router.post("/adminlc/api/parse-schedule")
+    @limiter.limit("10/minute")
+    async def parse_schedule(request: Request, admin: LCAdmin = Depends(require_admin)):
+        """Lê a imagem do cronograma e devolve as semanas como sugestão para o
+        formulário. Não grava nada."""
+        form = await request.form()
+        up = form.get("image")
+        if not isinstance(up, UploadFile) or not up.filename:
+            return JSONResponse({"error": "Escolha a imagem do cronograma primeiro."}, status_code=400)
+        mime = (up.content_type or "").lower()
+        if mime not in SCHEDULE_IMG_TYPES:
+            return JSONResponse({"error": "Formato não suportado. Use JPG, PNG, WEBP ou GIF."}, status_code=400)
+        data = await up.read(SCHEDULE_IMG_MAX + 1)
+        if len(data) > SCHEDULE_IMG_MAX:
+            return JSONResponse({"error": "Imagem acima de 10 MB."}, status_code=400)
+        reference = None
+        try:
+            raw = str(form.get("reference_date", "") or "").strip()
+            reference = date.fromisoformat(raw) if raw else None
+        except ValueError:
+            reference = None
+        try:
+            stages = await schedule_parser.parse_schedule_image(data, mime, reference)
+        except schedule_parser.ScheduleParseError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return {"stages": stages}
 
     def _get_reading(db: Session, reading_id: str) -> CollectiveReading:
         r = db.query(CollectiveReading).filter(CollectiveReading.id == reading_id).first()
