@@ -144,6 +144,7 @@ def build_router(templates, limiter) -> APIRouter:
         v = {f: str(form.get(f, "") or "").strip() for f in FIELDS}
         v["state"] = v["state"] or lc.STATE_PLANNED
         v["remove_cover"] = bool(form.get("remove_cover"))
+        v["remove_schedule_image"] = bool(form.get("remove_schedule_image"))
         return v
 
     def _parse_date(raw: str) -> Optional[date]:
@@ -174,6 +175,20 @@ def build_router(templates, limiter) -> APIRouter:
             errors.append("Informe a data de início — ou deixe a leitura como Prevista, sem data.")
         if parsed.get("start_date") and parsed.get("end_date") and parsed["end_date"] < parsed["start_date"]:
             errors.append("A data de fim não pode ser anterior à de início.")
+        # Estado coerente com o cronograma (senão o fluxo automático o
+        # desfaria na hora): em andamento não pode começar no futuro nem já ter
+        # acabado.
+        if v["state"] == lc.STATE_ONGOING and not errors:
+            today = lc.local_today()
+            if parsed.get("start_date") and parsed["start_date"] > today:
+                errors.append(
+                    "A data de início ainda não chegou — deixe a leitura como Prevista "
+                    "(ela passa sozinha para em andamento no dia do início)."
+                )
+            elif parsed.get("end_date") and parsed["end_date"] < today:
+                errors.append(
+                    "A data de fim já passou — marque a leitura como Concluída ou ajuste a data de fim."
+                )
         return errors, parsed
 
     async def _apply_cover(form, v: dict, reading: Optional[CollectiveReading]):
@@ -204,6 +219,21 @@ def build_router(templates, limiter) -> APIRouter:
 
         return cur_file, cur_url, None, None, None
 
+    async def _apply_schedule_image(form, v: dict, reading: Optional[CollectiveReading]):
+        """Imagem do cronograma. Devolve (arquivo_final, arquivo_antigo_a_apagar, erro).
+        Prioridade: novo upload > remover > manter."""
+        old_file = reading.schedule_image_filename if reading else None
+        upload = form.get("schedule_image_file")
+        if isinstance(upload, UploadFile) and upload.filename:
+            data = await upload.read(lc.MAX_SCHEDULE_IMAGE_BYTES + 1)
+            name = lc.save_cover_bytes(data, lc.MAX_SCHEDULE_IMAGE_BYTES) if data else None
+            if not name:
+                return old_file, None, "Imagem do cronograma inválida: envie JPG, PNG, WEBP ou GIF de até 10 MB."
+            return name, old_file, None
+        if v["remove_schedule_image"]:
+            return None, old_file, None
+        return old_file, None, None
+
     async def _save(request: Request, db: Session, admin: LCAdmin, reading: Optional[CollectiveReading]):
         form = await request.form()
         v = _form_values(form)
@@ -211,10 +241,18 @@ def build_router(templates, limiter) -> APIRouter:
         if v["category_id"] and not db.query(LCCategory).filter(LCCategory.id == v["category_id"]).first():
             errors.append("Categoria inválida — escolha uma da lista.")
         cover_file, cover_url, old_file, cover_err, notice = (None, None, None, None, None)
+        sched_file, old_sched, sched_err = None, None, None
         if not errors:
             cover_file, cover_url, old_file, cover_err, notice = await _apply_cover(form, v, reading)
             if cover_err:
                 errors.append(cover_err)
+        if not errors:
+            sched_file, old_sched, sched_err = await _apply_schedule_image(form, v, reading)
+            if sched_err:
+                errors.append(sched_err)
+                # a capa nova já foi gravada em disco: não deixa arquivo órfão
+                if cover_file and cover_file != (reading.cover_filename if reading else None):
+                    lc.delete_cover_file(cover_file)
         if errors:
             return render(
                 request, "adminlc_form.html", status_code=400,
@@ -237,8 +275,10 @@ def build_router(templates, limiter) -> APIRouter:
         reading.schedule_text = v["schedule_text"] or None
         reading.cover_filename = cover_file
         reading.cover_url = cover_url
+        reading.schedule_image_filename = sched_file
         db.commit()
         lc.delete_cover_file(old_file if old_file != cover_file else None)
+        lc.delete_cover_file(old_sched if old_sched != sched_file else None)
         lc.sync_reading_states(db)  # data de início já passada → em andamento
         return go("/adminlc", notice or ("created" if creating else "updated"))
 
@@ -249,6 +289,7 @@ def build_router(templates, limiter) -> APIRouter:
         values = {f: "" for f in FIELDS}
         values["state"] = lc.STATE_PLANNED
         values["remove_cover"] = False
+        values["remove_schedule_image"] = False
         return render(
             request, "adminlc_form.html", admin=admin, lc=None, values=values, errors=[],
             categories=lc.list_categories(db),
@@ -280,6 +321,7 @@ def build_router(templates, limiter) -> APIRouter:
             "start_date": r.start_date.isoformat() if r.start_date else "",
             "end_date": r.end_date.isoformat() if r.end_date else "",
             "schedule_text": r.schedule_text or "", "google_cover_url": "", "remove_cover": False,
+            "remove_schedule_image": False,
         }
         return render(
             request, "adminlc_form.html", admin=admin, lc=r, values=values, errors=[],
@@ -306,8 +348,15 @@ def build_router(templates, limiter) -> APIRouter:
         if new_state not in (lc.STATE_DONE, lc.STATE_ONGOING):
             raise HTTPException(status_code=400, detail="Estado inválido.")
         r = _get_reading(db, reading_id)
-        if new_state == lc.STATE_ONGOING and not r.start_date:
-            r.start_date = lc.local_today()  # prevista sem data: o início é hoje
+        if new_state == lc.STATE_ONGOING:
+            today = lc.local_today()
+            # "Iniciar agora"/reabrir: o início é hoje se não havia data ou se
+            # ainda era futura; um fim já passado seria desfeito pelo fluxo
+            # automático na hora, então é limpo (o admin pode pôr outro depois).
+            if not r.start_date or r.start_date > today:
+                r.start_date = today
+            if r.end_date and r.end_date < today:
+                r.end_date = None
         r.state = new_state
         db.commit()
         return go("/adminlc", "state")
@@ -400,10 +449,11 @@ def build_router(templates, limiter) -> APIRouter:
         reading_id: str, admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db)
     ):
         r = _get_reading(db, reading_id)
-        old_file = r.cover_filename
+        old_file, old_sched = r.cover_filename, r.schedule_image_filename
         db.delete(r)
         db.commit()
         lc.delete_cover_file(old_file)
+        lc.delete_cover_file(old_sched)
         return go("/adminlc", "deleted")
 
     # ------------------------------------------------------- administradores

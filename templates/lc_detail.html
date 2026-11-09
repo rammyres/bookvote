@@ -24,12 +24,19 @@
       {% endif %}
 
       {% if lc.description %}<p class="lc-text">{{ lc.description }}</p>{% endif %}
-
-      {% if lc.state != "done" and lc.schedule_text %}
-      <h2>Cronograma</h2>
-      <p class="lc-text">{{ lc.schedule_text }}</p>
-      {% endif %}
     </div>
   </div>
+
+  {% if lc.state != "done" and (lc.schedule_text or lc.schedule_image_src) %}
+  <section class="lc-schedule">
+    <h2>Cronograma</h2>
+    {% if lc.schedule_text %}<p class="lc-text">{{ lc.schedule_text }}</p>{% endif %}
+    {% if lc.schedule_image_src %}
+    <a href="{{ lc.schedule_image_src }}" target="_blank" rel="noopener" title="Abrir imagem em tamanho original">
+      <img src="{{ lc.schedule_image_src }}" alt="Cronograma da leitura {{ lc.title }}" class="lc-schedule-img" loading="lazy">
+    </a>
+    {% endif %}
+  </section>
+  {% endif %}
 </div>
 {% endblock %}

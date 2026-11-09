@@ -881,3 +881,15 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
   .whatsapp-float { right: 0.75rem; bottom: 0.75rem; padding: 0.6rem 0.9rem 0.6rem 0.75rem; font-size: 0.9rem; }
 }
 @media print { .whatsapp-float { display: none; } }
+
+/* imagem do cronograma (detalhe da leitura e formulário do admin) */
+.lc-schedule { margin-top: 1.5rem; }
+.lc-schedule-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75rem auto 0;
+  border-radius: 3px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.lc-form-schedule { width: 7rem; height: auto; border-radius: 2px; box-shadow: 0 2px 6px rgba(0,0,0,0.28); }

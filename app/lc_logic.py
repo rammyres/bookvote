@@ -52,22 +52,39 @@ def local_today() -> date:
 
 
 def sync_reading_states(db: Session) -> int:
-    """Prevista cuja data de início chegou vira 'em andamento'. Idempotente
-    e barato (um UPDATE) — chamado em toda página que lista LCs, então não
-    depende de cron nem de ninguém abrir o admin."""
-    n = (
+    """Segue o cronograma:
+      - prevista cuja data de início chegou (start_date <= hoje) vira 'em andamento';
+      - em andamento cuja data de fim já passou (end_date < hoje, ou seja, a
+        partir do dia seguinte ao último dia) vira 'concluída'.
+    Os dois passos rodam em sequência: prevista com início e fim já passados
+    chega a 'concluída' de uma vez. Sem data não há transição automática (o
+    admin muda no painel). Idempotente e barato (dois UPDATEs) — chamado em
+    toda página que lista LCs, então não depende de cron nem de admin."""
+    today = local_today()
+    started = (
         db.query(CollectiveReading)
         .filter(
             CollectiveReading.state == STATE_PLANNED,
             CollectiveReading.start_date.isnot(None),
-            CollectiveReading.start_date <= local_today(),
+            CollectiveReading.start_date <= today,
         )
         .update({CollectiveReading.state: STATE_ONGOING}, synchronize_session=False)
     )
-    if n:
+    finished = (
+        db.query(CollectiveReading)
+        .filter(
+            CollectiveReading.state == STATE_ONGOING,
+            CollectiveReading.end_date.isnot(None),
+            CollectiveReading.end_date < today,
+        )
+        .update({CollectiveReading.state: STATE_DONE}, synchronize_session=False)
+    )
+    if started or finished:
         db.commit()
-        logger.info("%d leitura(s) coletiva(s) prevista(s) passaram para em andamento.", n)
-    return n
+        logger.info(
+            "Leituras coletivas: %d passaram para em andamento, %d para concluída.", started, finished
+        )
+    return started + finished
 
 
 def _far_future() -> date:
@@ -353,6 +370,7 @@ COVERS_DIR = os.path.join(DATA_DIR, "lc_covers")
 os.makedirs(COVERS_DIR, exist_ok=True)
 
 MAX_COVER_BYTES = 5 * 1024 * 1024
+MAX_SCHEDULE_IMAGE_BYTES = 10 * 1024 * 1024  # cronograma costuma ser um print/arte grande
 _GOOGLE_HOST_SUFFIXES = (".google.com", ".googleusercontent.com", ".gstatic.com")
 
 
@@ -370,11 +388,12 @@ def sniff_image_ext(data: bytes) -> Optional[str]:
     return None
 
 
-def save_cover_bytes(data: bytes) -> Optional[str]:
+def save_cover_bytes(data: bytes, max_bytes: int = MAX_COVER_BYTES) -> Optional[str]:
     """Grava a imagem com nome aleatório e devolve o nome do arquivo, ou
-    None se não for uma imagem aceita."""
+    None se não for uma imagem aceita. Serve para capas e para a imagem do
+    cronograma (mesmo diretório, limite de tamanho diferente)."""
     ext = sniff_image_ext(data)
-    if not ext or len(data) > MAX_COVER_BYTES:
+    if not ext or len(data) > max_bytes:
         return None
     name = f"{secrets.token_hex(12)}.{ext}"
     with open(os.path.join(COVERS_DIR, name), "wb") as fh:

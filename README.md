@@ -75,9 +75,16 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
 - **Estados**: *prevista*, *em andamento* e *concluída*. Prevista vira
   em andamento **sozinha** quando a data de início chega (virada à meia-noite
   do fuso `BOOKVOTE_TZ`, padrão `America/Sao_Paulo`; vale na próxima página
-  que alguém abrir, sem cron). Concluir é sempre manual, pelo painel.
-  Concluídas não precisam de cronograma.
-- **Cronograma**: data de início, data de fim e etapas em texto livre. A
+  que alguém abrir, sem cron). Em andamento vira **concluída sozinha** no dia
+  seguinte à data de fim (leitura com início e fim já passados vai direto
+  para concluída). Sem data não há transição automática: use "Iniciar agora"
+  / "Concluir" no painel. O formulário não aceita "em andamento" com início
+  futuro ou fim já passado, e "Iniciar agora"/reabrir ajustam as datas
+  (início = hoje; fim já passado é limpo). Concluídas não precisam de
+  cronograma.
+- **Cronograma**: data de início, data de fim, etapas em texto livre e/ou uma
+  **imagem do cronograma** (JPG, PNG, WEBP ou GIF, até 10 MB; aparece na
+  página da leitura, clicável para abrir em tamanho original). A
   data de início é obrigatória para *em andamento*; uma leitura *prevista*
   pode ficar **sem data** ("data a definir") e não vira em andamento
   sozinha — o admin usa o botão "Iniciar agora" no painel (o início passa a

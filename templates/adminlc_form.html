@@ -48,17 +48,29 @@
       <option value="{{ key }}" {{ "selected" if values.state == key }}>{{ LC_STATE_LABELS[key] }}</option>
       {% endfor %}
     </select>
-    <p class="hint">Prevista vira “em andamento” sozinha quando a data de início chegar — e pode ficar sem data (“data a definir”), caso em que você a inicia manualmente no painel. Concluída é sempre marcada por você.</p>
+    <p class="hint">Prevista vira “em andamento” sozinha quando a data de início chegar — e pode ficar sem data (“data a definir”), caso em que você a inicia manualmente no painel. Em andamento vira “concluída” sozinha no dia seguinte à data de fim; sem data de fim, você conclui pelo painel.</p>
 
     <div id="schedule-block">
       <label for="start_date">Início do cronograma <span class="hint" id="start-hint">(obrigatório em andamento; opcional em prevista)</span></label>
       <input type="date" id="start_date" name="start_date" value="{{ values.start_date }}">
 
-      <label for="end_date">Fim do cronograma (opcional)</label>
+      <label for="end_date">Fim do cronograma <span class="hint">(opcional — passada essa data, a leitura vira concluída sozinha)</span></label>
       <input type="date" id="end_date" name="end_date" value="{{ values.end_date }}">
 
       <label for="schedule_text">Etapas do cronograma (opcional, uma por linha)</label>
       <textarea id="schedule_text" name="schedule_text" rows="5" maxlength="4000" placeholder="Semana 1 (01/12): capítulos 1 a 5&#10;Semana 2 (08/12): capítulos 6 a 10">{{ values.schedule_text }}</textarea>
+
+      <label for="schedule_image_file">Imagem do cronograma (opcional — JPG, PNG, WEBP ou GIF, até 10 MB)</label>
+      {% if lc and lc.schedule_image_src %}
+      <div class="book-preview">
+        <a href="{{ lc.schedule_image_src }}" target="_blank" rel="noopener"><img src="{{ lc.schedule_image_src }}" alt="Cronograma atual" class="lc-form-schedule"></a>
+        <div>
+          <span class="hint">Imagem atual — enviar outra abaixo a substitui.</span><br>
+          <label class="lc-check"><input type="checkbox" name="remove_schedule_image" value="1" {{ "checked" if values.remove_schedule_image }}> Remover imagem do cronograma</label>
+        </div>
+      </div>
+      {% endif %}
+      <input type="file" id="schedule_image_file" name="schedule_image_file" accept="image/jpeg,image/png,image/webp,image/gif">
     </div>
 
     <h2 style="margin-top:1.5rem;">Capa</h2>

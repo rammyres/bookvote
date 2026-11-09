@@ -300,8 +300,9 @@ class LCCategory(Base):
 class CollectiveReading(Base):
     """Uma Leitura Coletiva (LC). `state` é 'planned' (prevista), 'ongoing'
     (em andamento) ou 'done' (concluída). Prevista vira em andamento
-    sozinha quando `start_date` chega (lc_logic.sync_reading_states); a
-    conclusão é sempre manual. Concluídas não precisam de cronograma."""
+    sozinha quando `start_date` chega e em andamento vira concluída quando
+    `end_date` passa (lc_logic.sync_reading_states); sem data, o admin muda
+    o estado manualmente. Concluídas não precisam de cronograma."""
 
     __tablename__ = "collective_readings"
 
@@ -326,6 +327,8 @@ class CollectiveReading(Base):
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     schedule_text = Column(Text, nullable=True)
+    # cronograma em imagem (o mais comum): arquivo em disco, mesmo diretório das capas
+    schedule_image_filename = Column(String, nullable=True)
 
     # capa: arquivo salvo em disco (upload do admin ou baixado do Google
     # Books) tem prioridade; cover_url é só o fallback quando o download
@@ -336,6 +339,10 @@ class CollectiveReading(Base):
     created_by = Column(String, nullable=True)  # LCAdmin.id (sem FK de propósito)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    @property
+    def schedule_image_src(self):
+        return f"/media/lc/{self.schedule_image_filename}" if self.schedule_image_filename else None
 
     @property
     def cover_src(self):
