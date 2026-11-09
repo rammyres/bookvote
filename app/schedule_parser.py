@@ -20,7 +20,8 @@ def _clean_env(raw: str) -> str:
 
 
 GEMINI_API_KEY = _clean_env(os.environ.get("GEMINI_API_KEY", ""))
-GEMINI_MODEL = _clean_env(os.environ.get("GEMINI_MODEL", "")) or "gemini-2.5-flash"
+GEMINI_MODEL = _clean_env(os.environ.get("GEMINI_MODEL", "")) or "gemini-3.8-flash"
+THINKING_LEVEL = _clean_env(os.environ.get("GEMINI_THINKING_LEVEL", "")).lower() or "low"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 CONFIGURED = bool(GEMINI_API_KEY)
@@ -123,9 +124,8 @@ async def parse_schedule_image(data: bytes, mime: str, reference: Optional[date]
             ]
         }],
         "generationConfig": {
-            "temperature": 0,
-            # sem "raciocínio" interno: a extração é direta e fica bem mais rápida
-            "thinkingConfig": {"thinkingBudget": 0},
+            # extração direta de tabela: pouco raciocínio basta e fica mais rápido
+            "thinkingConfig": {"thinkingLevel": THINKING_LEVEL},
             "responseMimeType": "application/json",
             "responseSchema": SCHEMA,
         },
