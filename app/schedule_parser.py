@@ -39,7 +39,7 @@ PROMPT = (
     "primeiro e do último capítulo da semana, incluindo a numeração e o título, exatamente como "
     "escrito (ex.: '1.1 Dia de Santo Elfrico' e '1.12 Imperatriz ou morte'). Não inclua "
     "observações entre parênteses como '(Parte 1 inteira)'. Ignore número de páginas e qualquer "
-    "texto fora da tabela. Se um campo estiver ilegível, use null em vez de inventar."
+    "texto fora da tabela. Se a semana tiver um único capítulo ou conto, preencha só chapter_from e deixe chapter_to como null (nunca use '-'). Se um campo estiver ilegível, use null em vez de inventar."
 )
 
 SCHEMA = {
@@ -67,6 +67,11 @@ SCHEMA = {
 
 class ScheduleParseError(Exception):
     """Mensagem já pronta para mostrar ao admin."""
+
+
+def _field(v) -> str:
+    v = (v or "").strip()
+    return "" if v in ("-", "\u2013", "\u2014") else v[:MAX_FIELD]
 
 
 def _safe_date(y: int, m: int, d: int) -> Optional[date]:
@@ -109,8 +114,8 @@ def resolve_years(weeks: list[dict], reference: Optional[date] = None, today: Op
         out.append({
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "from": (w.get("chapter_from") or "").strip()[:MAX_FIELD],
-            "to": (w.get("chapter_to") or "").strip()[:MAX_FIELD],
+            "from": _field(w.get("chapter_from")),
+            "to": _field(w.get("chapter_to")),
         })
     return out
 

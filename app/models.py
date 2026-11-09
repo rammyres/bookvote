@@ -312,15 +312,36 @@ class LCStage(Base):
     chapter_from = Column(String, nullable=True)
     chapter_to = Column(String, nullable=True)
 
+    @staticmethod
+    def _clean(v):
+        """Trata "-", "–", "—" (marcadores de vazio) como campo vazio."""
+        v = (v or "").strip()
+        return "" if v in ("-", "\u2013", "\u2014") else v
+
     @property
     def chapters(self):
-        """Trecho para exibir: "1 a 5", "Prólogo" (só início) ou "até Parte II"."""
-        a, b = (self.chapter_from or "").strip(), (self.chapter_to or "").strip()
+        """Trecho para exibir: "1 a 5", "Prólogo" (só início/trecho único) ou
+        "até Parte II". Um fim vazio ou "-" é omitido (sem o "a -")."""
+        a, b = self._clean(self.chapter_from), self._clean(self.chapter_to)
         if a and b and a != b:
             return f"{a} a {b}"
         if a or b:
             return a or f"até {b}"
         return ""
+
+    @property
+    def days(self):
+        return (self.end_date - self.start_date).days + 1
+
+    @property
+    def duration_label(self):
+        """Duração para o leitor: até 5 dias em dias; acima disso, arredondada
+        para semanas (6 a 10 dias = 1 semana, 11 a 17 = 2, ...)."""
+        d = self.days
+        if d <= 5:
+            return "1 dia" if d == 1 else f"{d} dias"
+        w = max(1, int(d / 7 + 0.5))
+        return "1 semana" if w == 1 else f"{w} semanas"
 
 
 class CollectiveReading(Base):

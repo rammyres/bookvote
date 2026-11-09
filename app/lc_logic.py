@@ -221,6 +221,21 @@ def _dm(d: date) -> str:
     return d.strftime("%d/%m")
 
 
+SHORT_STAGE_DAYS = 5
+
+
+def stage_unit(stages) -> dict:
+    """Como chamar cada etapa do cronograma: "semana" se as etapas passam de
+    5 dias, "período" se todas são curtas (até 5 dias) e "etapa" se forem
+    misturadas. `art`/`first` ajudam a concordar o gênero nas frases."""
+    spans = [(s.end_date - s.start_date).days + 1 for s in stages]
+    if not spans or all(d > SHORT_STAGE_DAYS for d in spans):
+        return {"one": "semana", "many": "semanas", "cap": "Semana", "first": "Primeira", "next": "Próxima", "last": "última", "done_f": "concluídas"}
+    if all(d <= SHORT_STAGE_DAYS for d in spans):
+        return {"one": "período", "many": "períodos", "cap": "Período", "first": "Primeiro", "next": "Próximo", "last": "último", "done_f": "concluídos"}
+    return {"one": "etapa", "many": "etapas", "cap": "Etapa", "first": "Primeira", "next": "Próxima", "last": "última", "done_f": "concluídas"}
+
+
 def reading_progress(reading, today: Optional[date] = None) -> Optional[dict]:
     """Dados para a barra de progresso da página da leitura. Usa o
     cronograma detalhado (etapas) quando existe; senão, o tempo decorrido
@@ -237,6 +252,7 @@ def reading_progress(reading, today: Optional[date] = None) -> Optional[dict]:
 
     if stages:
         n = len(stages)
+        u = stage_unit(stages)
         status = []
         for s in stages:
             if s.end_date < today:
@@ -252,23 +268,23 @@ def reading_progress(reading, today: Optional[date] = None) -> Optional[dict]:
             span = (s.end_date - s.start_date).days + 1
             frac = min(max(((today - s.start_date).days + 1) / span, 0), 1)
             percent = round((done + frac) / n * 100)
-            title = f"Semana {i + 1} de {n}"
+            title = f"{u['cap']} {i + 1} de {n}"
             detail = f"{_dm(s.start_date)} a {_dm(s.end_date)}"
             if s.chapters:
                 detail += f" · trecho: {s.chapters}"
         elif done == n:
             percent, title = 100, "Cronograma concluído"
-            detail = f"A última semana terminou em {_dm(stages[-1].end_date)}."
+            detail = f"{'O' if u['one'] == 'período' else 'A'} {u['last']} {u['one']} terminou em {_dm(stages[-1].end_date)}."
         elif done == 0:
             percent, title = 0, f"A leitura começa em {_dm(stages[0].start_date)}"
-            detail = f"Primeira semana: {_dm(stages[0].start_date)} a {_dm(stages[0].end_date)}"
+            detail = f"{u['first']} {u['one']}: {_dm(stages[0].start_date)} a {_dm(stages[0].end_date)}"
             if stages[0].chapters:
                 detail += f" · trecho: {stages[0].chapters}"
         else:  # intervalo entre duas semanas
             nxt = stages[done]
             percent = round(done / n * 100)
-            title = f"{done} de {n} semanas concluídas"
-            detail = f"Próxima semana começa em {_dm(nxt.start_date)}"
+            title = f"{done} de {n} {u['many']} {u['done_f']}"
+            detail = f"{u['next']} {u['one']} começa em {_dm(nxt.start_date)}"
             if nxt.chapters:
                 detail += f" · trecho: {nxt.chapters}"
         return {"mode": "stages", "percent": percent, "title": title, "detail": detail,

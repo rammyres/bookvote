@@ -50,13 +50,14 @@
     {% if lc.stages %}
     <div class="lc-stages-wrap">
       <table class="lc-stages">
-        <thead><tr><th>Semana</th><th>Período</th><th>Trecho</th></tr></thead>
+        {% set unit = stage_unit(lc.stages) %}
+        <thead><tr><th>{{ unit.cap }}</th><th>Datas</th><th>Trecho</th></tr></thead>
         <tbody>
           {% for s in lc.stages %}
           {% set st = progress.stage_status[loop.index0] if (progress and lc.state == "ongoing" and progress.stage_status) else "upcoming" %}
           <tr class="lc-stage-{{ st }}">
             <td>{{ loop.index }}{% if st == "current" %} <span class="lc-stage-tag">atual</span>{% elif st == "done" %} <span class="lc-stage-tag lc-stage-tag-done">✓ concluída</span>{% endif %}</td>
-            <td>{{ s.start_date.strftime("%d/%m") }} a {{ s.end_date.strftime("%d/%m") }}</td>
+            <td>{% if s.start_date == s.end_date %}{{ s.start_date.strftime("%d/%m") }}{% else %}{{ s.start_date.strftime("%d/%m") }} a {{ s.end_date.strftime("%d/%m") }}{% endif %} <span class="lc-stage-dur">· {{ s.duration_label }}</span></td>
             <td>{{ s.chapters or "—" }}</td>
           </tr>
           {% endfor %}

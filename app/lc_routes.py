@@ -49,6 +49,7 @@ def build_router(templates, limiter) -> APIRouter:
     templates.env.globals["LC_GROUP_PAGE_LABELS"] = lc.GROUP_PAGE_LABELS
     templates.env.globals["group_readings"] = lc.group_readings
     templates.env.globals["split_featured"] = lc.split_featured
+    templates.env.globals["stage_unit"] = lc.stage_unit
     templates.env.globals["schedule_ai_enabled"] = schedule_parser.CONFIGURED
 
     # ------------------------------------------------------------ dependências
@@ -181,7 +182,8 @@ def build_router(templates, limiter) -> APIRouter:
             if len(r["from"]) > 80 or len(r["to"]) > 80:
                 errors.append(f"Semana {n}: o trecho passa de 80 caracteres.")
                 continue
-            out.append({"start": start, "end": end, "from": r["from"], "to": r["to"]})
+            clean = lambda v: "" if v.strip() in ("-", "\u2013", "\u2014") else v.strip()
+            out.append({"start": start, "end": end, "from": clean(r["from"]), "to": clean(r["to"])})
         out.sort(key=lambda s: (s["start"], s["end"]))
         return errors, out
 

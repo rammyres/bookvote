@@ -944,3 +944,4 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
   .lc-stage-row { grid-template-columns: 1fr 1fr; }
   .lc-stage-row .lc-stage-remove { grid-column: 1 / -1; }
 }
+.lc-stage-dur { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 400; color: #5A4F3B; white-space: nowrap; }
