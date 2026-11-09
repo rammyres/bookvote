@@ -42,6 +42,16 @@ def br_date(value: Optional[date]) -> str:
 def build_router(templates, limiter) -> APIRouter:
     router = APIRouter()
     templates.env.filters["br_date"] = br_date
+    def static_v(name: str) -> str:
+        """URL de /static com ?v=<mtime>: o navegador/Cloudflare recarrega
+        o arquivo sempre que ele muda (evita CSS antigo em cache)."""
+        try:
+            v = int(os.path.getmtime(os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", name)))
+        except OSError:
+            v = 0
+        return f"/static/{name}?v={v}"
+
+    templates.env.globals["static_v"] = static_v
     templates.env.globals["LC_STATE_LABELS"] = lc.STATE_LABELS
     templates.env.globals["LC_GROUP_LABELS"] = lc.GROUP_LABELS
     templates.env.globals["LC_GROUP_PAGES"] = lc.GROUP_PAGES
