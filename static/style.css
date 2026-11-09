@@ -884,10 +884,15 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 
 /* imagem do cronograma (detalhe da leitura e formulário do admin) */
 .lc-schedule { margin-top: 1.5rem; }
+.lc-schedule > a { display: block; }
 .lc-schedule-img {
   display: block;
-  max-width: 100%;
+  /* ocupa a largura do cartão (amplia as pequenas, reduz as grandes) e
+     mantém a proporção; imagens muito altas são limitadas à tela */
+  width: 100%;
   height: auto;
+  max-height: 85vh;
+  object-fit: contain;
   margin: 0.75rem auto 0;
   border-radius: 3px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
