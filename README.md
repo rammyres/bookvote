@@ -106,6 +106,16 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   topo da seção de andamento com a capa um pouco maior que as demais, borda
   dourada e uma etiqueta ★, e sai da grade abaixo. Basta criar a categoria
   com esse nome em `/adminlc/categorias` (renomeá-la desliga o destaque).
+- **Cronograma detalhado** (opcional): no formulário, uma linha por semana
+  — período (início e fim) e trecho a ler, "de"/"até", que pode ser número
+  ou nome de capítulo ("1" a "5", "Prólogo" a "Parte II"). Se o início/fim
+  geral da leitura estiverem vazios, usam-se os da primeira e da última
+  semana (e isso alimenta o fluxo automático de status).
+- **Barra de progresso** (página da leitura, só em andamento): com o
+  cronograma detalhado, acompanha as semanas — "Semana X de N", trecho da
+  semana, divisões na barra e a tabela com a semana atual destacada; sem ele,
+  segue o tempo entre início e fim ("Semana X de Y", "Dia D de T"); só com
+  início, mostra "Semana X da leitura" sem barra. Usa o fuso `BOOKVOTE_TZ`.
 - **Capa**: busca no Google Books (preenche título, autor, ISBN e capa) ou
   upload de JPG/PNG/WEBP/GIF até 5 MB. A capa do Google é **baixada para o
   servidor** (`/data/lc_covers`, mesmo volume do banco) — se o download

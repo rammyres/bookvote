@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ "Editar leitura coletiva" if lc else "Nova leitura coletiva" }}{% endblock %}
+{% macro stage_row(s) %}
+<div class="lc-stage-row">
+  <label>Semana de<input type="date" name="stage_start" value="{{ s.start }}"></label>
+  <label>a<input type="date" name="stage_end" value="{{ s.end }}"></label>
+  <label>Trecho: de<input type="text" name="stage_from" value="{{ s['from'] }}" maxlength="80" placeholder="Ex.: 1 ou Prólogo"></label>
+  <label>até<input type="text" name="stage_to" value="{{ s.to }}" maxlength="80" placeholder="Ex.: 5 ou Parte II"></label>
+  <button type="button" class="secondary lc-stage-remove" aria-label="Remover esta semana">Remover</button>
+</div>
+{% endmacro %}
 {% block content %}
 <div class="card lc-form">
   <p class="hint"><a href="/adminlc">← Voltar ao painel</a></p>
@@ -71,6 +80,15 @@
       </div>
       {% endif %}
       <input type="file" id="schedule_image_file" name="schedule_image_file" accept="image/jpeg,image/png,image/webp,image/gif">
+
+      <h3 style="margin-top:1.5rem;">Cronograma detalhado (opcional)</h3>
+      <p class="hint">Uma linha por semana: período e trecho a ler (número ou nome de capítulo). Com ele, a página da leitura mostra a tabela e uma barra de progresso que acompanha as semanas; sem ele, a barra segue o tempo entre início e fim. Se o início/fim do cronograma acima estiverem vazios, usamos o da primeira e o da última semana.</p>
+      <div id="stage-rows">
+        {% for s in values.stages %}{{ stage_row(s) }}{% endfor %}
+        {% if not values.stages %}{{ stage_row({"start": "", "end": "", "from": "", "to": ""}) }}{% endif %}
+      </div>
+      <template id="stage-template">{{ stage_row({"start": "", "end": "", "from": "", "to": ""}) }}</template>
+      <button type="button" class="secondary" id="stage-add">+ Adicionar semana</button>
     </div>
 
     <h2 style="margin-top:1.5rem;">Capa</h2>
@@ -186,5 +204,27 @@
   query.addEventListener('blur', function () { setTimeout(function () { box.hidden = true; }, 150); });
   query.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') ev.preventDefault(); });
 })();
+
+  // cronograma detalhado: adicionar/remover semanas
+  (function () {
+    var rows = document.getElementById('stage-rows');
+    var tpl = document.getElementById('stage-template');
+    var add = document.getElementById('stage-add');
+    if (!rows || !tpl || !add) return;
+    add.addEventListener('click', function () {
+      rows.appendChild(tpl.content.cloneNode(true));
+    });
+    rows.addEventListener('click', function (ev) {
+      var btn = ev.target.closest('.lc-stage-remove');
+      if (!btn) return;
+      var row = btn.closest('.lc-stage-row');
+      // a última linha só é esvaziada (linha vazia é ignorada ao salvar)
+      if (rows.querySelectorAll('.lc-stage-row').length === 1) {
+        row.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+      } else {
+        row.remove();
+      }
+    });
+  })();
 </script>
 {% endblock %}

@@ -212,6 +212,94 @@ def group_readings(readings, mode: str) -> list[tuple[Optional[str], list]]:
     return out
 
 
+# ------------------------------------------------------------------ progresso
+
+MAX_STAGES = 60
+
+
+def _dm(d: date) -> str:
+    return d.strftime("%d/%m")
+
+
+def reading_progress(reading, today: Optional[date] = None) -> Optional[dict]:
+    """Dados para a barra de progresso da página da leitura. Usa o
+    cronograma detalhado (etapas) quando existe; senão, o tempo decorrido
+    entre início e fim ("semana X de Y"); só com início, apenas "semana X".
+    Devolve None para concluída ou sem dados suficientes.
+
+    Chaves: mode ('stages'|'time'|'weeks'), percent (int|None — None = sem
+    barra), title, detail, stage_status (por etapa: done|current|upcoming),
+    ticks (nº de etapas, p/ marcar a divisão na barra)."""
+    if getattr(reading, "state", None) == STATE_DONE:
+        return None
+    today = today or local_today()
+    stages = list(getattr(reading, "stages", None) or [])
+
+    if stages:
+        n = len(stages)
+        status = []
+        for s in stages:
+            if s.end_date < today:
+                status.append("done")
+            elif s.start_date <= today:
+                status.append("current")
+            else:
+                status.append("upcoming")
+        done = status.count("done")
+        if "current" in status:
+            i = status.index("current")
+            s = stages[i]
+            span = (s.end_date - s.start_date).days + 1
+            frac = min(max(((today - s.start_date).days + 1) / span, 0), 1)
+            percent = round((done + frac) / n * 100)
+            title = f"Semana {i + 1} de {n}"
+            detail = f"{_dm(s.start_date)} a {_dm(s.end_date)}"
+            if s.chapters:
+                detail += f" · trecho: {s.chapters}"
+        elif done == n:
+            percent, title = 100, "Cronograma concluído"
+            detail = f"A última semana terminou em {_dm(stages[-1].end_date)}."
+        elif done == 0:
+            percent, title = 0, f"A leitura começa em {_dm(stages[0].start_date)}"
+            detail = f"Primeira semana: {_dm(stages[0].start_date)} a {_dm(stages[0].end_date)}"
+            if stages[0].chapters:
+                detail += f" · trecho: {stages[0].chapters}"
+        else:  # intervalo entre duas semanas
+            nxt = stages[done]
+            percent = round(done / n * 100)
+            title = f"{done} de {n} semanas concluídas"
+            detail = f"Próxima semana começa em {_dm(nxt.start_date)}"
+            if nxt.chapters:
+                detail += f" · trecho: {nxt.chapters}"
+        return {"mode": "stages", "percent": percent, "title": title, "detail": detail,
+                "stage_status": status, "ticks": n}
+
+    start, end = getattr(reading, "start_date", None), getattr(reading, "end_date", None)
+    if not start:
+        return None
+    if end and end >= start:
+        total = (end - start).days + 1
+        weeks_total = -(-total // 7)
+        if today < start:
+            return {"mode": "time", "percent": 0, "title": f"A leitura começa em {_dm(start)}",
+                    "detail": f"Termina em {_dm(end)}", "stage_status": [], "ticks": 0}
+        if today > end:
+            return {"mode": "time", "percent": 100, "title": "Prazo da leitura encerrado",
+                    "detail": f"Terminou em {_dm(end)}", "stage_status": [], "ticks": 0}
+        elapsed = (today - start).days + 1
+        week = (today - start).days // 7 + 1
+        return {"mode": "time", "percent": round(elapsed / total * 100),
+                "title": f"Semana {week} de {weeks_total}",
+                "detail": f"Dia {elapsed} de {total} · termina em {_dm(end)}",
+                "stage_status": [], "ticks": 0}
+    if today < start:
+        return {"mode": "weeks", "percent": None, "title": f"A leitura começa em {_dm(start)}",
+                "detail": "", "stage_status": [], "ticks": 0}
+    week = (today - start).days // 7 + 1
+    return {"mode": "weeks", "percent": None, "title": f"Semana {week} da leitura",
+            "detail": f"Desde {_dm(start)}", "stage_status": [], "ticks": 0}
+
+
 # ------------------------------------------------------------------ destaque
 
 # Leituras em andamento cuja categoria tem este nome ganham destaque na

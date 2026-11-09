@@ -27,9 +27,43 @@
     </div>
   </div>
 
-  {% if lc.state != "done" and (lc.schedule_text or lc.schedule_image_src) %}
+  {% if progress and lc.state == "ongoing" %}
+  <section class="lc-progress" aria-label="Progresso da leitura">
+    <h2>Acompanhe a leitura</h2>
+    <div class="lc-progress-head">
+      <strong>{{ progress.title }}</strong>
+      {% if progress.detail %}<span>{{ progress.detail }}</span>{% endif %}
+    </div>
+    {% if progress.percent is not none %}
+    <div class="lc-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}" aria-label="Progresso da leitura">
+      <div class="lc-progress-fill" style="width: {{ progress.percent }}%"></div>
+      {% for i in range(1, progress.ticks) %}<span class="lc-progress-tick" style="left: {{ (i * 100 / progress.ticks)|round(2) }}%"></span>{% endfor %}
+    </div>
+    <div class="lc-progress-pct">{{ progress.percent }}%</div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if lc.state != "done" and (lc.stages or lc.schedule_text or lc.schedule_image_src) %}
   <section class="lc-schedule">
     <h2>Cronograma</h2>
+    {% if lc.stages %}
+    <div class="lc-stages-wrap">
+      <table class="lc-stages">
+        <thead><tr><th>Semana</th><th>Período</th><th>Trecho</th></tr></thead>
+        <tbody>
+          {% for s in lc.stages %}
+          {% set st = progress.stage_status[loop.index0] if (progress and lc.state == "ongoing" and progress.stage_status) else "upcoming" %}
+          <tr class="lc-stage-{{ st }}">
+            <td>{{ loop.index }}{% if st == "current" %} <span class="lc-stage-tag">atual</span>{% elif st == "done" %} <span class="lc-stage-tag lc-stage-tag-done">✓ concluída</span>{% endif %}</td>
+            <td>{{ s.start_date.strftime("%d/%m") }} a {{ s.end_date.strftime("%d/%m") }}</td>
+            <td>{{ s.chapters or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
     {% if lc.schedule_text %}<p class="lc-text">{{ lc.schedule_text }}</p>{% endif %}
     {% if lc.schedule_image_src %}
     <a href="{{ lc.schedule_image_src }}" target="_blank" rel="noopener" title="Abrir imagem em tamanho original">

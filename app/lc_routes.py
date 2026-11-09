@@ -11,7 +11,7 @@ from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
 from .database import get_db
-from .models import CollectiveReading, LCAdmin, LCCategory
+from .models import CollectiveReading, LCAdmin, LCCategory, LCStage
 
 MSGS = {
     "created": "Leitura cadastrada.",
@@ -42,16 +42,6 @@ def br_date(value: Optional[date]) -> str:
 def build_router(templates, limiter) -> APIRouter:
     router = APIRouter()
     templates.env.filters["br_date"] = br_date
-    def static_v(name: str) -> str:
-        """URL de /static com ?v=<mtime>: o navegador/Cloudflare recarrega
-        o arquivo sempre que ele muda (evita CSS antigo em cache)."""
-        try:
-            v = int(os.path.getmtime(os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", name)))
-        except OSError:
-            v = 0
-        return f"/static/{name}?v={v}"
-
-    templates.env.globals["static_v"] = static_v
     templates.env.globals["LC_STATE_LABELS"] = lc.STATE_LABELS
     templates.env.globals["LC_GROUP_LABELS"] = lc.GROUP_LABELS
     templates.env.globals["LC_GROUP_PAGES"] = lc.GROUP_PAGES
@@ -100,7 +90,7 @@ def build_router(templates, limiter) -> APIRouter:
         reading = db.query(CollectiveReading).filter(CollectiveReading.id == reading_id).first()
         if not reading:
             raise HTTPException(status_code=404, detail="Leitura coletiva não encontrada.")
-        return render(request, "lc_detail.html", lc=reading)
+        return render(request, "lc_detail.html", lc=reading, progress=lc.reading_progress(reading))
 
     # ------------------------------------------------------------ login/logout
 
@@ -155,7 +145,43 @@ def build_router(templates, limiter) -> APIRouter:
         v["state"] = v["state"] or lc.STATE_PLANNED
         v["remove_cover"] = bool(form.get("remove_cover"))
         v["remove_schedule_image"] = bool(form.get("remove_schedule_image"))
+        # cronograma detalhado: listas paralelas (uma posição por linha do formulário)
+        cols = [
+            [str(x).strip() for x in form.getlist(k)]
+            for k in ("stage_start", "stage_end", "stage_from", "stage_to")
+        ]
+        v["stages"] = [
+            {"start": a, "end": b, "from": c, "to": d}
+            for a, b, c, d in zip(*cols)
+            if a or b or c or d  # linha totalmente vazia = ignorada
+        ]
         return v
+
+    def _parse_stages(rows: list[dict]) -> tuple[list[str], list[dict]]:
+        """Valida as linhas do cronograma detalhado. Cada semana precisa de
+        início e fim; trecho (de/até) é opcional e pode ser número ou nome."""
+        errors: list[str] = []
+        out: list[dict] = []
+        if len(rows) > lc.MAX_STAGES:
+            return [f"O cronograma detalhado aceita até {lc.MAX_STAGES} semanas."], []
+        for n, r in enumerate(rows, 1):
+            try:
+                start, end = _parse_date(r["start"]), _parse_date(r["end"])
+            except ValueError:
+                errors.append(f"Semana {n}: data inválida.")
+                continue
+            if not start or not end:
+                errors.append(f"Semana {n}: informe a data de início e a de fim.")
+                continue
+            if end < start:
+                errors.append(f"Semana {n}: o fim não pode ser anterior ao início.")
+                continue
+            if len(r["from"]) > 80 or len(r["to"]) > 80:
+                errors.append(f"Semana {n}: o trecho passa de 80 caracteres.")
+                continue
+            out.append({"start": start, "end": end, "from": r["from"], "to": r["to"]})
+        out.sort(key=lambda s: (s["start"], s["end"]))
+        return errors, out
 
     def _parse_date(raw: str) -> Optional[date]:
         return date.fromisoformat(raw) if raw else None
@@ -247,7 +273,16 @@ def build_router(templates, limiter) -> APIRouter:
     async def _save(request: Request, db: Session, admin: LCAdmin, reading: Optional[CollectiveReading]):
         form = await request.form()
         v = _form_values(form)
+        stage_errors, stages = _parse_stages(v["stages"])
+        # com cronograma detalhado, o período da leitura segue as semanas
+        # quando o admin não preencheu início/fim (alimenta o fluxo automático)
+        if stages and not stage_errors:
+            if not v["start_date"]:
+                v["start_date"] = stages[0]["start"].isoformat()
+            if not v["end_date"]:
+                v["end_date"] = max(s["end"] for s in stages).isoformat()
         errors, parsed = _validate(v)
+        errors = stage_errors + errors
         if v["category_id"] and not db.query(LCCategory).filter(LCCategory.id == v["category_id"]).first():
             errors.append("Categoria inválida — escolha uma da lista.")
         cover_file, cover_url, old_file, cover_err, notice = (None, None, None, None, None)
@@ -286,6 +321,11 @@ def build_router(templates, limiter) -> APIRouter:
         reading.cover_filename = cover_file
         reading.cover_url = cover_url
         reading.schedule_image_filename = sched_file
+        reading.stages = [
+            LCStage(position=i, start_date=s["start"], end_date=s["end"],
+                    chapter_from=s["from"] or None, chapter_to=s["to"] or None)
+            for i, s in enumerate(stages)
+        ]
         db.commit()
         lc.delete_cover_file(old_file if old_file != cover_file else None)
         lc.delete_cover_file(old_sched if old_sched != sched_file else None)
@@ -300,6 +340,7 @@ def build_router(templates, limiter) -> APIRouter:
         values["state"] = lc.STATE_PLANNED
         values["remove_cover"] = False
         values["remove_schedule_image"] = False
+        values["stages"] = []
         return render(
             request, "adminlc_form.html", admin=admin, lc=None, values=values, errors=[],
             categories=lc.list_categories(db),
@@ -332,6 +373,11 @@ def build_router(templates, limiter) -> APIRouter:
             "end_date": r.end_date.isoformat() if r.end_date else "",
             "schedule_text": r.schedule_text or "", "google_cover_url": "", "remove_cover": False,
             "remove_schedule_image": False,
+            "stages": [
+                {"start": s.start_date.isoformat(), "end": s.end_date.isoformat(),
+                 "from": s.chapter_from or "", "to": s.chapter_to or ""}
+                for s in r.stages
+            ],
         }
         return render(
             request, "adminlc_form.html", admin=admin, lc=r, values=values, errors=[],

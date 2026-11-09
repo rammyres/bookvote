@@ -297,6 +297,32 @@ class LCCategory(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class LCStage(Base):
+    """Uma etapa (semana) do cronograma detalhado de uma leitura coletiva:
+    período + trecho a ler, que pode ser número ou nome ("1" a "5",
+    "Prólogo" a "Parte II"). `position` é a ordem (por data de início)."""
+
+    __tablename__ = "lc_stages"
+
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
+    reading_id = Column(String, ForeignKey("collective_readings.id"), nullable=False, index=True)
+    position = Column(Integer, nullable=False, default=0)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    chapter_from = Column(String, nullable=True)
+    chapter_to = Column(String, nullable=True)
+
+    @property
+    def chapters(self):
+        """Trecho para exibir: "1 a 5", "Prólogo" (só início) ou "até Parte II"."""
+        a, b = (self.chapter_from or "").strip(), (self.chapter_to or "").strip()
+        if a and b and a != b:
+            return f"{a} a {b}"
+        if a or b:
+            return a or f"até {b}"
+        return ""
+
+
 class CollectiveReading(Base):
     """Uma Leitura Coletiva (LC). `state` é 'planned' (prevista), 'ongoing'
     (em andamento) ou 'done' (concluída). Prevista vira em andamento
@@ -318,6 +344,14 @@ class CollectiveReading(Base):
     # ORM funciona igual, e apagar categoria zera category_id na mão.)
     category_id = Column(String, ForeignKey("lc_categories.id"), nullable=True, index=True)
     category = relationship("LCCategory", lazy="joined")
+
+    # cronograma detalhado (opcional): semanas com datas e trecho a ler
+    stages = relationship(
+        "LCStage",
+        cascade="all, delete-orphan",
+        order_by="LCStage.position",
+        lazy="selectin",
+    )
 
     state = Column(String, nullable=False, default="planned", index=True)
 

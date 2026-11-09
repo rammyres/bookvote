@@ -884,17 +884,63 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 
 /* imagem do cronograma (detalhe da leitura e formulário do admin) */
 .lc-schedule { margin-top: 1.5rem; }
-.lc-schedule > a { display: block; width: fit-content; max-width: 100%; margin: 0 auto; }
 .lc-schedule-img {
   display: block;
-  /* nunca amplia: usa o tamanho natural, limitado a 420px de largura,
-     60% da altura da tela e à largura do cartão, sempre proporcional */
-  width: auto;
+  max-width: 100%;
   height: auto;
-  max-width: min(100%, 420px);
-  max-height: 60vh;
   margin: 0.75rem auto 0;
   border-radius: 3px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
 }
 .lc-form-schedule { width: 7rem; height: auto; border-radius: 2px; box-shadow: 0 2px 6px rgba(0,0,0,0.28); }
+
+/* progresso da leitura + cronograma detalhado */
+.lc-progress { margin-top: 1.5rem; }
+.lc-progress-head { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; margin-bottom: 0.6rem; }
+.lc-progress-head span { color: #5A4F3B; font-size: 0.92rem; }
+.lc-progress-track {
+  position: relative;
+  height: 14px;
+  background: var(--paper-dim);
+  border: 1px solid rgba(36, 30, 20, 0.35);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.lc-progress-fill { height: 100%; background: var(--brass); border-radius: 999px 0 0 999px; }
+.lc-progress-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(36, 30, 20, 0.45); }
+.lc-progress-pct { margin-top: 0.3rem; text-align: right; font-family: var(--font-mono); font-size: 0.8rem; color: var(--stamp); }
+
+.lc-stages-wrap { overflow-x: auto; margin-top: 0.5rem; }
+.lc-stages { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.lc-stages th, .lc-stages td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid rgba(36, 30, 20, 0.2); }
+.lc-stages th { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: #5A4F3B; }
+.lc-stage-done td { opacity: 0.6; }
+.lc-stage-current td { background: rgba(184, 146, 63, 0.22); font-weight: 600; }
+.lc-stage-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--brass);
+  color: #241E14;
+  border-radius: 2px;
+}
+.lc-stage-tag-done { background: transparent; border: 1px solid currentColor; }
+
+/* linhas do cronograma detalhado no formulário do admin */
+.lc-stage-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 0.5rem;
+  align-items: end;
+  margin: 0.5rem 0;
+}
+.lc-stage-row label { margin: 0; font-size: 0.8rem; }
+.lc-stage-row input { width: 100%; }
+@media (max-width: 640px) {
+  .lc-stage-row { grid-template-columns: 1fr 1fr; }
+  .lc-stage-row .lc-stage-remove { grid-column: 1 / -1; }
+}
