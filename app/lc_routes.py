@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
+from . import lc_suggestions as lcs
 from . import schedule_parser
 from .database import get_db
 from .models import CollectiveReading, LCAdmin, LCCategory, LCStage
@@ -29,6 +30,10 @@ MSGS = {
     "password_set": "Senha redefinida.",
     "password_changed": "Sua senha foi alterada.",
     "logged_out": "Você saiu.",
+    "suggestion_confirmed": "Leitura criada como prevista (data a definir). Use \"Editar\" para definir datas, categoria e cronograma.",
+    "suggestion_dismissed": "Sugestão dispensada. Dá para reconsiderar em \"Dispensadas\".",
+    "suggestion_restored": "Sugestão voltou para a lista.",
+    "suggestion_gone": "Essa sugestão já foi tratada (talvez por outro administrador).",
 }
 
 
@@ -107,10 +112,12 @@ def build_router(templates, limiter) -> APIRouter:
             has_admin = db.query(LCAdmin).count() > 0
             return render(request, "adminlc_login.html", has_admin=has_admin, error=None, username="")
         groups = lc.grouped_readings(db)
+        lcs.sync_suggestions(db)  # enquetes que encerraram desde a última visita viram sugestões
         return render(
             request, "adminlc_dashboard.html",
             admin=admin, groups=groups, today=lc.local_today(),
             group_mode=lc.get_group_mode(db), group_pages=lc.get_group_pages(db),
+            suggestions=lcs.list_suggestions(db),
         )
 
     @router.post("/adminlc/login")
@@ -450,6 +457,32 @@ def build_router(templates, limiter) -> APIRouter:
         r.state = new_state
         db.commit()
         return go("/adminlc", "state")
+
+    # ------------------------------------------- sugestões vindas das enquetes
+    # Qualquer administrador de LC (não só o principal) confirma ou dispensa.
+
+    @router.post("/adminlc/sugestoes/{suggestion_id}/confirmar")
+    @limiter.limit("30/minute")
+    async def confirm_suggestion(
+        request: Request, suggestion_id: str,
+        admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db),
+    ):
+        reading = await lcs.confirm_suggestion(db, suggestion_id, admin.id)
+        return go("/adminlc", "suggestion_confirmed" if reading else "suggestion_gone")
+
+    @router.post("/adminlc/sugestoes/{suggestion_id}/dispensar")
+    def dismiss_suggestion(
+        suggestion_id: str, admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db)
+    ):
+        ok = lcs.dismiss_suggestion(db, suggestion_id, admin.id)
+        return go("/adminlc", "suggestion_dismissed" if ok else "suggestion_gone")
+
+    @router.post("/adminlc/sugestoes/{suggestion_id}/reconsiderar")
+    def restore_suggestion(
+        suggestion_id: str, admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db)
+    ):
+        ok = lcs.restore_suggestion(db, suggestion_id)
+        return go("/adminlc", "suggestion_restored" if ok else "suggestion_gone")
 
     @router.post("/adminlc/grouping")
     async def set_grouping(

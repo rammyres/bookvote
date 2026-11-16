@@ -69,6 +69,59 @@
   {% endif %}
 </div>
 
+{% set pending = suggestions["pending"] %}
+{% set dismissed = suggestions["dismissed"] %}
+{% if pending or dismissed %}
+<div class="card lc-form lc-suggestions" id="sugestoes">
+  <h2>Sugestões de novas LCs ({{ pending|length }})</h2>
+  <p class="hint">Livros escolhidos em enquetes encerradas. Ao confirmar, a leitura entra como <strong>prevista</strong> (data a definir) com a capa da indicação; depois é só editar para definir datas e categoria.</p>
+  {% if pending %}
+  <ul class="book-list">
+    {% for it in pending %}
+    <li class="book-row lc-admin-row">
+      {% if it.cover_src %}
+      <img src="{{ it.cover_src }}" alt="" class="lc-admin-thumb">
+      {% else %}
+      <span class="lc-admin-thumb lc-admin-thumb-empty" aria-hidden="true">📕</span>
+      {% endif %}
+      <div class="book-row-text">
+        <span class="title">{{ it.book.title }}</span>
+        {% if it.book.author %}<br><span class="author">{{ it.book.author }}</span>{% endif %}
+        <br><span class="isbn">Vencedor da enquete <a href="/p/{{ it.poll.id }}" style="text-decoration:underline;">{{ it.poll.title }}</a> · {{ it.s.votes }} voto{{ "s" if it.s.votes != 1 else "" }}{% if it.s.by_draw %} · decidido por sorteio{% endif %}</span>
+        {% if it.dup %}<br><span class="lc-overdue">Já existe uma LC com este título ou ISBN — confira antes de confirmar.</span>{% endif %}
+        <div class="lc-actions">
+          <form method="post" action="/adminlc/sugestoes/{{ it.s.id }}/confirmar"><button type="submit">Confirmar como LC prevista</button></form>
+          <form method="post" action="/adminlc/sugestoes/{{ it.s.id }}/dispensar" onsubmit="return confirm('Dispensar &quot;{{ it.book.title|e }}&quot;? Não vira LC, mas dá para reconsiderar depois.');"><button type="submit" class="secondary">Dispensar</button></form>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">Nenhuma sugestão pendente.</p>
+  {% endif %}
+
+  {% if dismissed %}
+  <details>
+    <summary>Dispensadas ({{ dismissed|length }})</summary>
+    <ul class="book-list">
+      {% for it in dismissed %}
+      <li class="book-row lc-admin-row">
+        <div class="book-row-text">
+          <span class="title">{{ it.book.title }}</span>
+          <span class="isbn"> — enquete {{ it.poll.title }}</span>
+          <div class="lc-actions">
+            <form method="post" action="/adminlc/sugestoes/{{ it.s.id }}/reconsiderar"><button type="submit" class="secondary">Reconsiderar</button></form>
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+
 {% for key, title, empty in (
   ("ongoing", "Em andamento", "Nenhuma leitura em andamento."),
   ("planned", "Previstas", "Nenhuma leitura prevista. Quando a data de início chegar, ela passa sozinha para \"em andamento\" (sem data, use \"Iniciar agora\")."),

@@ -13,8 +13,8 @@
   {% if results.champion %}
   <h2 style="margin-top:1.5rem;">📖 Livro escolhido</h2>
   <div class="spine-row champion-reveal">
-    {% if results.champion.book.thumbnail_url %}
-    <img src="{{ results.champion.book.thumbnail_url }}" alt="" class="book-thumb" style="width:2.6rem; height:3.8rem; min-width:2.6rem;">
+    {% if results.champion.book.cover_src %}
+    <img src="{{ results.champion.book.cover_src }}" alt="" class="book-thumb" style="width:2.6rem; height:3.8rem; min-width:2.6rem;">
     {% endif %}
     <span class="spine" style="width:80%; height:2.6rem; font-size:1rem;">
       <span>{{ results.champion.book.title }}</span>
@@ -63,8 +63,8 @@
   <ul class="book-list">
     {% for t in results.ranked %}
     <li class="book-row">
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}

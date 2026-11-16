@@ -20,6 +20,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from .database import DATA_DIR
+from .media import delete_image, save_image, sniff_image_ext  # noqa: F401  (sniff re-exportado)
 from .models import CollectiveReading, LCAdmin, LCCategory, SiteSetting
 from .security import SECRET_KEY
 
@@ -478,42 +479,15 @@ MAX_SCHEDULE_IMAGE_BYTES = 10 * 1024 * 1024  # cronograma costuma ser um print/a
 _GOOGLE_HOST_SUFFIXES = (".google.com", ".googleusercontent.com", ".gstatic.com")
 
 
-def sniff_image_ext(data: bytes) -> Optional[str]:
-    """Extensão pela assinatura (magic bytes), não pelo nome/Content-Type
-    enviados — e SVG fica de fora de propósito (pode carregar script)."""
-    if data[:3] == b"\xff\xd8\xff":
-        return "jpg"
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return "png"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "webp"
-    return None
-
-
 def save_cover_bytes(data: bytes, max_bytes: int = MAX_COVER_BYTES) -> Optional[str]:
     """Grava a imagem com nome aleatório e devolve o nome do arquivo, ou
     None se não for uma imagem aceita. Serve para capas e para a imagem do
     cronograma (mesmo diretório, limite de tamanho diferente)."""
-    ext = sniff_image_ext(data)
-    if not ext or len(data) > max_bytes:
-        return None
-    name = f"{secrets.token_hex(12)}.{ext}"
-    with open(os.path.join(COVERS_DIR, name), "wb") as fh:
-        fh.write(data)
-    return name
+    return save_image(data, COVERS_DIR, max_bytes)
 
 
 def delete_cover_file(filename: Optional[str]) -> None:
-    if not filename or "/" in filename or "\\" in filename or filename.startswith("."):
-        return
-    try:
-        os.remove(os.path.join(COVERS_DIR, filename))
-    except FileNotFoundError:
-        pass
-    except OSError:
-        logger.warning("Não consegui apagar a capa %s", filename, exc_info=True)
+    delete_image(COVERS_DIR, filename)
 
 
 def is_google_image_url(url: str) -> bool:

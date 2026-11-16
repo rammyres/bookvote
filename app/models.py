@@ -104,6 +104,10 @@ class Book(Base):
     title = Column(String, nullable=False)
     author = Column(String, nullable=True)
     thumbnail_url = Column(String, nullable=True)
+    # imagem enviada (por quem indicou ou pelo admin da enquete): arquivo em
+    # disco (media.BOOK_IMAGES_DIR) e tem prioridade sobre thumbnail_url, que
+    # é só o link da miniatura do Google Books.
+    image_filename = Column(String, nullable=True)
     submitted_by = Column(String, nullable=True)  # display name, optional
     voter_id = Column(String, nullable=True, index=True)  # who nominated it
 
@@ -120,6 +124,13 @@ class Book(Base):
 
     poll = relationship("Poll", back_populates="books")
     votes = relationship("Vote", back_populates="book", cascade="all, delete-orphan")
+
+    @property
+    def cover_src(self):
+        """Imagem a exibir: upload (se houver) → miniatura do Google → None."""
+        if self.image_filename:
+            return f"/media/books/{self.image_filename}"
+        return self.thumbnail_url or None
 
 
 class Vote(Base):
@@ -405,6 +416,31 @@ class CollectiveReading(Base):
             return f"/media/lc/{self.cover_filename}"
         return self.cover_url or None
 
+
+
+class LCSuggestion(Base):
+    """Sugestão de nova Leitura Coletiva gerada pelo livro campeão de uma
+    enquete encerrada. Fica `pending` até um administrador de LC confirmar
+    (vira uma CollectiveReading prevista, sem data) ou dispensar. Uma por
+    enquete (poll_id único) — por isso dispensar não a recria depois."""
+
+    __tablename__ = "lc_suggestions"
+
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
+    poll_id = Column(String, ForeignKey("polls.id"), nullable=False, unique=True, index=True)
+    book_id = Column(String, ForeignKey("books.id"), nullable=False)
+    # fotografia do resultado no momento em que a enquete fechou
+    votes = Column(Integer, nullable=False, default=0)
+    by_draw = Column(Boolean, nullable=False, default=False)
+
+    status = Column(String, nullable=False, default="pending", index=True)  # pending|confirmed|dismissed
+    reading_id = Column(String, nullable=True)  # LC criada na confirmação (sem FK de propósito)
+    resolved_by = Column(String, nullable=True)  # LCAdmin.id
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    poll = relationship("Poll", lazy="joined")
+    book = relationship("Book", lazy="joined")
 
 
 class SiteSetting(Base):

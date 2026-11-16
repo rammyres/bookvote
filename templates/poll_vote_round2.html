@@ -41,8 +41,8 @@
   <ul class="book-list">
     {% for t in tallies %}
     <li class="book-row">
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
@@ -61,8 +61,8 @@
     {% for t in tallies %}
     <label class="book-check" style="text-transform:none; font-weight:400; margin:0;">
       <input type="radio" name="book_id" value="{{ t.book.id }}" required {% if t.book.id == my_book_id %}checked{% endif %}>
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}

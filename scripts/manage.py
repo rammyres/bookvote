@@ -29,7 +29,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import Base, SessionLocal, engine  # noqa: E402
-from app.models import Book, DrawLog, LCAdmin, Poll, Raffle, RaffleDraw, RaffleEntry, Vote, VoterIdentity  # noqa: E402
+from app.models import Book, DrawLog, LCAdmin, LCSuggestion, Poll, Raffle, RaffleDraw, RaffleEntry, Vote, VoterIdentity  # noqa: E402
+from app import media  # noqa: E402
 from app import lc_logic as lcl  # noqa: E402
 from app import poll_logic as pl  # noqa: E402
 from app import raffle_logic as rl  # noqa: E402
@@ -104,8 +105,16 @@ def delete_poll(args: argparse.Namespace) -> None:
         # precisa apagar manualmente antes, ou fica órfão referenciando um
         # poll_id que não existe mais.
         db.query(VoterIdentity).filter_by(poll_id=poll.id).delete()
+        # idem para a sugestão de LC (sem cascade); a LC já criada a partir
+        # dela, se houver, é independente e fica.
+        db.query(LCSuggestion).filter_by(poll_id=poll.id).delete()
+        image_files = [
+            f for (f,) in db.query(Book.image_filename).filter(Book.poll_id == poll.id).all() if f
+        ]
         db.delete(poll)  # cascade="all, delete-orphan" cuida de books/votes/draws
         db.commit()
+        for f in image_files:  # imagens enviadas nas indicações
+            media.delete_image(media.BOOK_IMAGES_DIR, f)
         print("Enquete apagada.")
     finally:
         db.close()

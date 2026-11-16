@@ -10,7 +10,7 @@ load_dotenv()  # no-op if vars are already set (e.g. by docker-compose's env_fil
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from fastapi import FastAPI, Request, Response, Form, Depends, HTTPException
+from fastapi import FastAPI, Request, Response, Form, File, UploadFile, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,6 +18,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
 
@@ -26,6 +27,8 @@ from .models import Book, Poll, Vote, VoterIdentity, Raffle, RaffleEntry, gen_sh
 from . import poll_logic as pl
 from . import raffle_logic as rl
 from . import lc_logic as lcl
+from . import lc_suggestions as lcs
+from . import media
 from .lc_routes import build_router as build_lc_router
 from .book_search import search_books
 from .email_sender import send_email
@@ -114,6 +117,7 @@ if _round1_released_is_new:
         )
 ensure_column("books", "rejected", "BOOLEAN DEFAULT 0")
 ensure_column("books", "rejection_reason", "VARCHAR")
+ensure_column("books", "image_filename", "VARCHAR")
 ensure_column("draws", "kind", "VARCHAR DEFAULT 'champion'")
 ensure_column("polls", "promotion_tie_policy", "VARCHAR DEFAULT 'draw'")
 ensure_column("polls", "cancelled", "BOOLEAN DEFAULT 0")
@@ -164,6 +168,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 # capas das Leituras Coletivas (uploads/baixadas do Google) — ficam no volume de dados
 app.mount("/media/lc", StaticFiles(directory=lcl.COVERS_DIR), name="lc_covers")
+# imagens enviadas nas indicações (por quem indicou ou pelo admin da enquete) — mesmo volume de dados
+app.mount("/media/books", StaticFiles(directory=media.BOOK_IMAGES_DIR), name="book_images")
 app.include_router(build_lc_router(templates, limiter))
 
 MAX_VOTER_IDENTITIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_VOTERS_PER_IP", "6"))
@@ -292,6 +298,7 @@ FORM_ERROR_MESSAGES = {
     "too_many_voters": "Muitos votantes distintos a partir desta rede. Fale com o organizador.",
     "phase_ended": "Essa fase acabou de ser encerrada — a página foi atualizada com a fase atual.",
     "invalid_book": "Livro inválido para esta votação.",
+    "invalid_image": "Imagem inválida — envie JPG, PNG, WEBP ou GIF de até 5 MB.",
 }
 
 
@@ -312,6 +319,7 @@ ADMIN_ERROR_MESSAGES = {
     "order": "O novo prazo entraria em conflito com o prazo de outra fase — estenda essa outra fase primeiro, se for o caso.",
     "bad_phase": "Fase inválida.",
     "poll_closed": "A enquete já foi encerrada com um resultado final — não dá mais para cancelar.",
+    "invalid_image": "Imagem inválida — envie JPG, PNG, WEBP ou GIF de até 5 MB.",
 }
 
 
@@ -1149,6 +1157,8 @@ async def nominate(
     isbn: str = Form(""),
     thumbnail_url: str = Form(""),
     submitted_by: str = Form(""),
+    # sem arquivo escolhido, o navegador manda uma parte vazia que chega como str ''
+    image_file: UploadFile | str | None = File(default=None),
     cf_turnstile_response: str = Form(default="", alias="cf-turnstile-response"),
     db: Session = Depends(get_db),
 ):
@@ -1184,12 +1194,24 @@ async def nominate(
     if not (thumb_clean.startswith("http://") or thumb_clean.startswith("https://")):
         thumb_clean = None
 
+    # Imagem enviada por quem indica: tem prioridade sobre a miniatura do
+    # Google. Só é gravada em disco depois de todas as outras checagens
+    # passarem, para uma indicação recusada não deixar arquivo órfão.
+    image_name = None
+    if isinstance(image_file, StarletteUploadFile) and image_file.filename:
+        data = await image_file.read(media.MAX_BOOK_IMAGE_BYTES + 1)
+        image_name = media.save_image(data, media.BOOK_IMAGES_DIR, media.MAX_BOOK_IMAGE_BYTES) if data else None
+        if not image_name:
+            return redirect_with_error(poll_id, "invalid_image")
+        thumb_clean = None
+
     book = Book(
         poll_id=poll.id,
         title=title.strip(),
         author=author.strip() or None,
         isbn=isbn_clean,
         thumbnail_url=thumb_clean,
+        image_filename=image_name,
         submitted_by=submitted_by.strip() or None,
         voter_id=voter_id,
     )
@@ -1198,6 +1220,7 @@ async def nominate(
         db.commit()
     except IntegrityError:
         db.rollback()
+        media.delete_image(media.BOOK_IMAGES_DIR, image_name)
         return redirect_with_error(poll_id, "duplicate")
 
     return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
@@ -1396,6 +1419,52 @@ def unreject_book(admin_token: str, book_id: str, db: Session = Depends(get_db))
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 
+@app.post("/admin/{admin_token}/books/{book_id}/image")
+@limiter.limit("30/minute")
+async def admin_set_book_image(
+    request: Request,
+    admin_token: str,
+    book_id: str,
+    # sem arquivo escolhido, o navegador manda uma parte vazia que chega como str ''
+    image_file: UploadFile | str | None = File(default=None),
+    db: Session = Depends(get_db),
+):
+    """O organizador envia (ou troca) a imagem de qualquer indicação. Vale em
+    qualquer fase: é só a capa, e ela segue para a LC se o livro vencer."""
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    book = db.query(Book).filter(Book.id == book_id, Book.poll_id == poll.id).first()
+    if not book:
+        raise HTTPException(404, "Livro não encontrado.")
+    if not isinstance(image_file, StarletteUploadFile) or not image_file.filename:
+        return redirect_admin_with_error(admin_token, "invalid_image")
+    data = await image_file.read(media.MAX_BOOK_IMAGE_BYTES + 1)
+    name = media.save_image(data, media.BOOK_IMAGES_DIR, media.MAX_BOOK_IMAGE_BYTES) if data else None
+    if not name:
+        return redirect_admin_with_error(admin_token, "invalid_image")
+    old = book.image_filename
+    book.image_filename = name
+    book.thumbnail_url = None  # o upload substitui a miniatura do Google
+    db.commit()
+    media.delete_image(media.BOOK_IMAGES_DIR, old)
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
+@app.post("/admin/{admin_token}/books/{book_id}/image/remove")
+def admin_remove_book_image(admin_token: str, book_id: str, db: Session = Depends(get_db)):
+    """Tira a imagem da indicação (upload e miniatura do Google): volta ao
+    ícone padrão."""
+    poll = get_poll_by_admin_token_or_404(db, admin_token)
+    book = db.query(Book).filter(Book.id == book_id, Book.poll_id == poll.id).first()
+    if not book:
+        raise HTTPException(404, "Livro não encontrado.")
+    old = book.image_filename
+    book.image_filename = None
+    book.thumbnail_url = None
+    db.commit()
+    media.delete_image(media.BOOK_IMAGES_DIR, old)
+    return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
+
+
 @app.post("/admin/{admin_token}/extend")
 def extend_deadline(
     admin_token: str,
@@ -1558,6 +1627,7 @@ def trigger_draw(admin_token: str, db: Session = Depends(get_db)):
     results = pl.compute_final_results(db, poll)
     if results.tie_group and not results.draw:
         pl.run_champion_draw(db, poll, results.tie_group)
+        lcs.sync_suggestions(db)  # o campeão acabou de ser definido: já sugere a LC
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 
@@ -1577,6 +1647,7 @@ def trigger_draw_json(admin_token: str, db: Session = Depends(get_db)):
     if not results.draw:
         pl.run_champion_draw(db, poll, results.tie_group)
         results = pl.compute_final_results(db, poll)
+        lcs.sync_suggestions(db)  # o campeão acabou de ser definido: já sugere a LC
 
     return JSONResponse(
         {

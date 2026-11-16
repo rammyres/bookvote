@@ -127,8 +127,8 @@
   <ul class="book-list">
     {% for b in books %}
     <li class="book-row{% if b.rejected %} book-row-rejected{% endif %}">
-      {% if b.thumbnail_url %}
-      <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
+      {% if b.cover_src %}
+      <img src="{{ b.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
@@ -152,10 +152,23 @@
           <button type="submit" class="secondary" onclick="return confirm('Recusar esta indicação? Ela deixa de valer para a votação.');">Recusar indicação</button>
         </form>
         {% endif %}
+
+        <div class="image-controls">
+          <form method="post" action="/admin/{{ poll.admin_token }}/books/{{ b.id }}/image" enctype="multipart/form-data" class="image-form">
+            <input type="file" name="image_file" accept="image/jpeg,image/png,image/webp,image/gif" required aria-label="Imagem de {{ b.title }}">
+            <button type="submit" class="secondary">{{ "Trocar imagem" if b.cover_src else "Enviar imagem" }}</button>
+          </form>
+          {% if b.cover_src %}
+          <form method="post" action="/admin/{{ poll.admin_token }}/books/{{ b.id }}/image/remove" style="display:inline;" onsubmit="return confirm('Remover a imagem desta indicação?');">
+            <button type="submit" class="secondary link-button">remover imagem</button>
+          </form>
+          {% endif %}
+        </div>
       </div>
     </li>
     {% endfor %}
   </ul>
+  <p class="hint">Imagens: JPG, PNG, WEBP ou GIF, até 5 MB. Você pode trocar a imagem de qualquer indicação a qualquer momento — se o livro vencer, ela vira a capa da leitura coletiva sugerida.</p>
 </div>
 
 {% if round1_tally %}
@@ -164,8 +177,8 @@
   <ul class="book-list">
     {% for t in round1_tally %}
     <li class="book-row">
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
@@ -195,8 +208,8 @@
   <ul class="book-list">
     {% for t in promotion.tie_group %}
     <li class="book-row">
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
@@ -222,8 +235,8 @@
   <ul class="book-list">
     {% for t in round2_tally %}
     <li class="book-row">
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
@@ -254,8 +267,8 @@
   <ul class="book-list">
     {% for t in results.tie_group %}
     <li class="book-row">
-      {% if t.book.thumbnail_url %}
-      <img src="{{ t.book.thumbnail_url }}" alt="" class="book-thumb">
+      {% if t.book.cover_src %}
+      <img src="{{ t.book.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}

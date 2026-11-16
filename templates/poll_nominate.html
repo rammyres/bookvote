@@ -25,8 +25,8 @@
   <ul class="book-list">
     {% for b in books %}
     <li class="book-row">
-      {% if b.thumbnail_url %}
-      <img src="{{ b.thumbnail_url }}" alt="" class="book-thumb">
+      {% if b.cover_src %}
+      <img src="{{ b.cover_src }}" alt="" class="book-thumb">
       {% else %}
       <span class="book-thumb book-thumb-placeholder" aria-hidden="true">📕</span>
       {% endif %}
@@ -48,7 +48,7 @@
   <p class="hint">Você já indicou {{ my_nom_count }} de {{ poll.max_noms_per_voter }} livros permitidos.</p>
 
   {% if my_nom_count < poll.max_noms_per_voter %}
-  <form method="post" action="/p/{{ poll.id }}/nominate" id="nominate-form" autocomplete="off">
+  <form method="post" action="/p/{{ poll.id }}/nominate" id="nominate-form" autocomplete="off" enctype="multipart/form-data">
 
     <div id="search-block">
       <label for="book-query">Livro</label>
@@ -83,6 +83,14 @@
     <input type="hidden" id="book-author" name="author" value="">
     <input type="hidden" id="book-isbn" name="isbn" value="">
     <input type="hidden" id="book-thumb" name="thumbnail_url" value="">
+
+    <label for="image_file">Imagem da capa (opcional)</label>
+    <input type="file" id="image_file" name="image_file" accept="image/jpeg,image/png,image/webp,image/gif">
+    <p class="hint" id="image-hint">JPG, PNG, WEBP ou GIF, até 5 MB. Se você enviar uma imagem, ela substitui a capa sugerida pelo Google Books.</p>
+    <div id="image-preview" class="book-preview" hidden>
+      <img id="image-preview-img" class="book-thumb" alt="">
+      <div class="hint" id="image-preview-name"></div>
+    </div>
 
     <label for="submitted_by">Seu nome (opcional, aparece para todos)</label>
     <input type="text" id="submitted_by" name="submitted_by">
@@ -252,6 +260,34 @@
 
     goManual.addEventListener('click', function (ev) { ev.preventDefault(); enableManual(); });
     goSearch.addEventListener('click', function (ev) { ev.preventDefault(); enableSearch(); });
+  })();
+  </script>
+  <script>
+  (function () {
+    var input = document.getElementById('image_file');
+    if (!input) return;
+    var hint = document.getElementById('image-hint');
+    var box = document.getElementById('image-preview');
+    var img = document.getElementById('image-preview-img');
+    var nameEl = document.getElementById('image-preview-name');
+    var defaultHint = hint.textContent;
+    var MAX = 5 * 1024 * 1024;
+    input.addEventListener('change', function () {
+      var f = input.files && input.files[0];
+      box.hidden = true;
+      hint.textContent = defaultHint;
+      if (!f) return;
+      if (f.size > MAX) {
+        input.value = '';
+        hint.textContent = 'Essa imagem passa de 5 MB — escolha uma menor.';
+        return;
+      }
+      if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
+      img.dataset.url = URL.createObjectURL(f);
+      img.src = img.dataset.url;
+      nameEl.textContent = f.name;
+      box.hidden = false;
+    });
   })();
   </script>
   {% else %}

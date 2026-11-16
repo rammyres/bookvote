@@ -945,3 +945,14 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
   .lc-stage-row .lc-stage-remove { grid-column: 1 / -1; }
 }
 .lc-stage-dur { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 400; color: #5A4F3B; white-space: nowrap; }
+
+
+/* --- imagem das indicações (painel do organizador) --- */
+.image-controls { margin-top: 0.5rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.image-form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0; }
+.image-form input[type=file] { flex: 1; min-width: 12rem; font-size: 0.78rem; width: auto; }
+.image-form button { margin-top: 0; }
+
+/* --- sugestões de novas LCs (painel /adminlc) --- */
+.lc-suggestions details { margin-top: 1rem; }
+.lc-suggestions summary { cursor: pointer; font-size: 0.85rem; color: #8a7c5c; }

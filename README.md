@@ -14,8 +14,14 @@ numa única instância pequena (Docker + nginx na frente).
 
 - **Indicações** (`/p/<id>`): qualquer pessoa com o link sugere livros até
   o prazo definido na criação. Busca em tempo real via Google Books
-  (título, autor, ISBN e capa vêm prontos) ou indicação manual, sem capa.
+  (título, autor, ISBN e capa vêm prontos) ou indicação manual.
   Limite configurável de indicações por pessoa.
+- **Imagem nas indicações**: quem indica pode **enviar uma imagem** (JPG,
+  PNG, WEBP ou GIF, até 5 MB) — ela substitui a capa do Google Books — e o
+  organizador pode enviar, trocar ou remover a imagem de **qualquer**
+  indicação pelo painel (`/admin/<token>`), em qualquer fase. Os arquivos
+  ficam em `/data/book_images` (mesmo volume do banco) e aparecem na lista
+  de indicações, nas votações, na apuração e no resultado.
 - **Revisão (congelada)**: ao encerrar as indicações, a lista trava e a
   votação **não** começa sozinha — o organizador entra no painel
   (`/admin/<token>`), revisa (pode recusar indicações e reverter) e clica
@@ -121,6 +127,20 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   servidor** (`/data/lc_covers`, mesmo volume do banco) — se o download
   falhar, o app usa o link do Google como reserva. Se o admin enviar um
   arquivo, ele tem prioridade.
+- **Sugestões vindas das enquetes**: quando uma enquete encerra com um
+  livro escolhido (campeão, inclusive por sorteio de desempate), ele aparece
+  no topo do painel `/adminlc` em "Sugestões de novas LCs". Qualquer
+  administrador de LC pode **confirmar** — basta um clique: nasce uma leitura
+  **prevista**, sem data ("data a definir"), com título, autor, ISBN e a
+  capa da indicação (upload copiado ou miniatura do Google baixada), pronta
+  para editar datas e categoria — ou **dispensar** (dá para reconsiderar em
+  "Dispensadas"). Enquete cancelada, sem votos na votação final ou com
+  empate ainda sem sorteio não gera sugestão. As sugestões são criadas ao
+  abrir o painel (sem cron). Na **primeira vez** depois da atualização, todas
+  as enquetes antigas já encerradas aparecem de uma vez; as que já viraram LC
+  vêm com o aviso "já existe uma LC com este título ou ISBN" — é só
+  dispensar. A tabela `lc_suggestions` e a coluna `books.image_filename`
+  são criadas sozinhas na subida.
 - **Administração** (`/adminlc`): login com usuário e senha (mín. 10
   caracteres). O **administrador principal** cria/desativa outros
   administradores e redefine a senha deles; todos os administradores
@@ -314,9 +334,9 @@ Dados ficam no volume Docker `bookvote_data` (SQLite):
 ```bash
 docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
   cp /data/bookvote.db /backup/bookvote-backup.db
-# capas das leituras coletivas (se houver):
+# capas das leituras coletivas e imagens das indicações (se houver):
 docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
-  tar czf /backup/lc_covers-backup.tgz -C /data lc_covers
+  tar czf /backup/imagens-backup.tgz -C /data lc_covers book_images
 ```
 
 ### Atualizando depois de mudar o código
