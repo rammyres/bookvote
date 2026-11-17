@@ -117,7 +117,10 @@
     </div>
     <input type="hidden" id="google_cover_url" name="google_cover_url" value="{{ values.google_cover_url }}">
 
-    <label for="cover_file">Ou enviar uma imagem (JPG, PNG, WEBP ou GIF, até 5 MB)</label>
+    <button type="button" class="secondary" id="cover-search-btn">Buscar capas sugeridas (Open Library, BrasilAPI, Google Books)</button>
+    {% include "_cover_picker.html" %}
+
+    <label for="cover_file">Ou enviar uma imagem (JPG, PNG, WEBP ou GIF, até 5 MB — tem prioridade sobre as capas sugeridas)</label>
     <input type="file" id="cover_file" name="cover_file" accept="image/jpeg,image/png,image/webp,image/gif">
 
     <div class="lc-actions">
@@ -148,12 +151,26 @@
   }
   showCover(coverUrl.value);
 
+  // capas sugeridas por ISBN/título (static/cover_picker.js); escolher uma esconde a prévia do Google
+  var picker = CoverPicker(document.getElementById('cover-picker'), document.getElementById('cover-choice'), {
+    onChange: function (token) { if (token) { preview.hidden = true; } else { showCover(coverUrl.value); } }
+  });
+  function searchCovers() {
+    picker.search({
+      isbn: document.getElementById('isbn').value,
+      title: document.getElementById('title').value,
+      author: document.getElementById('author').value
+    });
+  }
+  document.getElementById('cover-search-btn').addEventListener('click', searchCovers);
+
   function pick(b) {
     document.getElementById('title').value = b.title || '';
     document.getElementById('author').value = b.author || '';
     document.getElementById('isbn').value = b.isbn || '';
     coverUrl.value = b.thumbnail || '';
     showCover(b.thumbnail);
+    searchCovers();
     box.hidden = true;
     query.value = '';
     status.textContent = b.thumbnail ? 'Dados preenchidos. Confira e salve.' : 'Dados preenchidos (esse livro não tem capa no Google — envie uma imagem se quiser).';

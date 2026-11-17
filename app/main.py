@@ -29,6 +29,7 @@ from . import raffle_logic as rl
 from . import lc_logic as lcl
 from . import lc_suggestions as lcs
 from . import media
+from . import cover_search
 from .lc_routes import build_router as build_lc_router
 from .book_search import search_books
 from .email_sender import send_email
@@ -1147,6 +1148,32 @@ async def api_book_search(request: Request, q: str = ""):
     return JSONResponse(results)
 
 
+@app.get("/api/cover-candidates")
+@limiter.limit("20/minute")
+async def api_cover_candidates(request: Request, isbn: str = "", title: str = "", author: str = ""):
+    """Capas sugeridas (Open Library, BrasilAPI, Google Books) para o livro
+    escolhido no formulário. Devolve tokens assinados, nunca URLs de origem."""
+    return JSONResponse(await cover_search.find_covers(isbn, title, author))
+
+
+@app.get("/api/cover-preview")
+@limiter.limit("120/minute")
+async def api_cover_preview(request: Request, t: str = ""):
+    """Imagem de uma candidata, servida pelo próprio servidor (o navegador não
+    precisa falar com as fontes). Vem do cache da busca; se expirou, baixa de novo."""
+    data = await cover_search.fetch_candidate(t)
+    if not data:
+        raise HTTPException(404, "Capa não encontrada.")
+    mime = {"jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}[
+        media.sniff_image_ext(data) or "jpg"
+    ]
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Cache-Control": "public, max-age=900", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @app.post("/p/{poll_id}/nominate")
 @limiter.limit("20/minute")
 async def nominate(
@@ -1157,6 +1184,7 @@ async def nominate(
     isbn: str = Form(""),
     thumbnail_url: str = Form(""),
     submitted_by: str = Form(""),
+    cover_choice: str = Form(""),
     # sem arquivo escolhido, o navegador manda uma parte vazia que chega como str ''
     image_file: UploadFile | str | None = File(default=None),
     cf_turnstile_response: str = Form(default="", alias="cf-turnstile-response"),
@@ -1204,6 +1232,14 @@ async def nominate(
         if not image_name:
             return redirect_with_error(poll_id, "invalid_image")
         thumb_clean = None
+    elif cover_choice.strip():
+        # Capa escolhida entre as sugeridas (token assinado, nunca URL). Se não
+        # der para baixar agora, a indicação segue com a miniatura do Google,
+        # como antes — uma fonte fora do ar não pode travar a indicação.
+        data = await cover_search.fetch_candidate(cover_choice)
+        image_name = media.save_image(data, media.BOOK_IMAGES_DIR, media.MAX_BOOK_IMAGE_BYTES) if data else None
+        if image_name:
+            thumb_clean = None
 
     book = Book(
         poll_id=poll.id,

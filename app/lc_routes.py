@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
+from . import cover_search
 from . import lc_suggestions as lcs
 from . import schedule_parser
 from .database import get_db
@@ -148,7 +149,7 @@ def build_router(templates, limiter) -> APIRouter:
     # ---------------------------------------------------- cadastro de leituras
 
     FIELDS = ("title", "author", "isbn", "description", "category_id", "state", "start_date", "end_date",
-              "schedule_text", "google_cover_url")
+              "schedule_text", "google_cover_url", "cover_choice")
 
     def _form_values(form) -> dict:
         v = {f: str(form.get(f, "") or "").strip() for f in FIELDS}
@@ -240,7 +241,8 @@ def build_router(templates, limiter) -> APIRouter:
 
     async def _apply_cover(form, v: dict, reading: Optional[CollectiveReading]):
         """Decide a capa final. Devolve (cover_filename, cover_url, arquivo_antigo_a_apagar,
-        erro, aviso). Prioridade: upload > escolha do Google > remover > manter."""
+        erro, aviso). Prioridade: upload > capa sugerida (Open Library/BrasilAPI/Google
+        por token) > escolha do Google > remover > manter."""
         old_file = reading.cover_filename if reading else None
         cur_file = old_file
         cur_url = reading.cover_url if reading else None
@@ -251,6 +253,15 @@ def build_router(templates, limiter) -> APIRouter:
             name = lc.save_cover_bytes(data) if data else None
             if not name:
                 return cur_file, cur_url, None, "Capa inválida: envie JPG, PNG, WEBP ou GIF de até 5 MB.", None
+            return name, None, old_file, None, None
+
+        if v["cover_choice"]:
+            data = await cover_search.fetch_candidate(v["cover_choice"])
+            name = lc.save_cover_bytes(data) if data else None
+            if not name:
+                return cur_file, cur_url, None, (
+                    "Não consegui baixar a capa sugerida escolhida — tente de novo, escolha outra ou envie um arquivo."
+                ), None
             return name, None, old_file, None, None
 
         if v["google_cover_url"]:
@@ -412,7 +423,7 @@ def build_router(templates, limiter) -> APIRouter:
             "description": r.description or "", "category_id": r.category_id or "", "state": r.state,
             "start_date": r.start_date.isoformat() if r.start_date else "",
             "end_date": r.end_date.isoformat() if r.end_date else "",
-            "schedule_text": r.schedule_text or "", "google_cover_url": "", "remove_cover": False,
+            "schedule_text": r.schedule_text or "", "google_cover_url": "", "cover_choice": "", "remove_cover": False,
             "remove_schedule_image": False,
             "stages": [
                 {"start": s.start_date.isoformat(), "end": s.end_date.isoformat(),

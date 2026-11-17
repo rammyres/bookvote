@@ -22,6 +22,30 @@ numa única instância pequena (Docker + nginx na frente).
   indicação pelo painel (`/admin/<token>`), em qualquer fase. Os arquivos
   ficam em `/data/book_images` (mesmo volume do banco) e aparecem na lista
   de indicações, nas votações, na apuração e no resultado.
+- **Capas sugeridas** (indicação e cadastro de LC): ao escolher o livro (ou
+  clicar em "Buscar capas"), o formulário mostra miniaturas de capas achadas
+  por ISBN em **Open Library**, **BrasilAPI** (que consulta CBL, Mercado
+  Editorial etc.) e **Google Books**; sem ISBN (ou com poucas), completa com
+  a busca por título/autor na Open Library. Clique numa miniatura para
+  escolhê-la (clique de novo desmarca). Prioridade ao salvar: **upload** >
+  capa sugerida > miniatura do Google > nenhuma. Detalhes de funcionamento:
+  - o navegador nunca envia URL de imagem — cada candidata é um *token
+    assinado* (fonte + ISBN/id) e o servidor remonta o endereço e baixa a
+    imagem ao salvar; downloads só em https e para hosts públicos (checado a
+    cada redirecionamento), já que a BrasilAPI devolve URLs de terceiros;
+  - cada candidata é validada (JPG/PNG/GIF/WEBP pela assinatura do arquivo,
+    entre 3 KB e 3 MB, largura mínima de 100 px) — "sem capa" e placeholders
+    de 1 pixel não aparecem; imagens idênticas entre fontes aparecem uma vez;
+  - as consultas saem do IP do servidor, então os limites das APIs valem para
+    o clube todo: há cache em memória (10 min) e limite de 20 buscas/min por
+    IP. O cache é por processo — com `--workers` > 1 só perde eficiência, não
+    corretude (o token baixa de novo se faltar no cache);
+  - na indicação, se a capa escolhida não puder ser baixada na hora, a
+    indicação segue normalmente com a miniatura do Google; no cadastro de LC
+    (ação de administrador) o formulário volta com um erro claro;
+  - a Open Library pede, por cortesia, crédito/link para o site deles
+    (<https://openlibrary.org>) e que a API de capas seja usada para exibição,
+    não para download em massa — o uso aqui é pontual, por livro escolhido.
 - **Revisão (congelada)**: ao encerrar as indicações, a lista trava e a
   votação **não** começa sozinha — o organizador entra no painel
   (`/admin/<token>`), revisa (pode recusar indicações e reverter) e clica
