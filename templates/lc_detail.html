@@ -26,31 +26,59 @@
       {% if lc.description %}<p class="lc-text">{{ lc.description }}</p>{% endif %}
 
       {% if lc.materials %}
-      <section class="lc-material" aria-label="Material de apoio">
+      {% set pdfs = lc.materials|selectattr("is_pdf")|list %}
+      {% set imgs = lc.materials|rejectattr("is_pdf")|list %}
+      <section class="lc-material" aria-label="Material de apoio" data-material-panel>
         <h2>Material de apoio</h2>
-        {% set pdfs = lc.materials|selectattr("is_pdf")|list %}
-        {% set imgs = lc.materials|rejectattr("is_pdf")|list %}
-        {% if pdfs %}
-        <ul class="lc-material-list">
-          {% for m in pdfs %}
-          <li>
-            <a href="{{ m.url }}" target="_blank" rel="noopener"><span aria-hidden="true">📄</span> {{ m.title }}</a>
-            <span class="hint">PDF · {{ m.size_label }}</span>
-          </li>
-          {% endfor %}
-        </ul>
+        {% if imgs and pdfs %}
+        <div class="lc-material-tabs" role="tablist" aria-label="Tipo de material">
+          <button type="button" role="tab" id="mat-tab-img" aria-controls="mat-panel-img" aria-selected="true" data-tab="img">🖼 Imagens <span class="lc-material-count">{{ imgs|length }}</span></button>
+          <button type="button" role="tab" id="mat-tab-pdf" aria-controls="mat-panel-pdf" aria-selected="false" tabindex="-1" data-tab="pdf">📄 Documentos PDF <span class="lc-material-count">{{ pdfs|length }}</span></button>
+        </div>
+        {% elif imgs %}
+        <p class="lc-material-kind">🖼 Imagens <span class="lc-material-count">{{ imgs|length }}</span></p>
+        {% else %}
+        <p class="lc-material-kind">📄 Documentos PDF <span class="lc-material-count">{{ pdfs|length }}</span></p>
         {% endif %}
+
         {% if imgs %}
-        <div class="lc-material-images">
-          {% for m in imgs %}
-          <a href="{{ m.url }}" target="_blank" rel="noopener" title="{{ m.title }}">
-            <img src="{{ m.url }}" alt="{{ m.title }}" loading="lazy">
-            <span>{{ m.title }}</span>
-          </a>
-          {% endfor %}
+        <div class="lc-material-pane" id="mat-panel-img" role="tabpanel" aria-labelledby="mat-tab-img" data-pane="img" tabindex="0">
+          <ul class="lc-thumbs">
+            {% for m in imgs %}
+            <li>
+              <a href="{{ m.url }}" target="_blank" rel="noopener" title="{{ m.title }}" data-lightbox data-title="{{ m.title }}">
+                <img src="{{ m.url }}" alt="{{ m.title }}" loading="lazy" decoding="async">
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if pdfs %}
+        <div class="lc-material-pane" id="mat-panel-pdf" role="tabpanel" aria-labelledby="mat-tab-pdf" data-pane="pdf" tabindex="0"{% if imgs %} hidden{% endif %}>
+          <ul class="lc-material-list">
+            {% for m in pdfs %}
+            <li>
+              <a href="{{ m.url }}" target="_blank" rel="noopener"><span aria-hidden="true">📄</span> {{ m.title }}</a>
+              <span class="hint">PDF · {{ m.size_label }}</span>
+            </li>
+            {% endfor %}
+          </ul>
         </div>
         {% endif %}
       </section>
+      <dialog class="lc-lightbox" id="lc-lightbox" aria-label="Imagem ampliada">
+        <button type="button" class="lc-lb-close" aria-label="Fechar">×</button>
+        <button type="button" class="lc-lb-nav lc-lb-prev" aria-label="Imagem anterior">‹</button>
+        <figure>
+          <img alt="">
+          <figcaption></figcaption>
+        </figure>
+        <button type="button" class="lc-lb-nav lc-lb-next" aria-label="Próxima imagem">›</button>
+        <a class="lc-lb-open" target="_blank" rel="noopener">Abrir original ↗</a>
+      </dialog>
+      <script src="/static/material_panel.js" defer></script>
       {% endif %}
     </div>
   </div>
