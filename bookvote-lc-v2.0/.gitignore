@@ -1,9 +1,0 @@
-.env
-.env.*bak*
-*.bak
-.venv/
-.vscode/
-app/__pycache__/
-app/__pycache__/*
-data/
-data/bookvote.db
