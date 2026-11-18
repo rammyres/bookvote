@@ -995,10 +995,19 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 /* painel com altura limitada: rola por dentro em vez de empurrar a página */
 .lc-material-pane { max-height: 15rem; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem; background: var(--paper-dim); border: 1px solid var(--line); border-radius: 3px; }
 .lc-material-pane[hidden] { display: none; }
-.lc-thumbs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr)); gap: 0.4rem; }
-.lc-thumbs a { display: block; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--paper); cursor: zoom-in; }
+/* As miniaturas ficam contidas na largura da área da capa da leitura. */
+.lc-material-pane[data-pane="img"] { width: 100%; max-width: 240px; }
+.lc-thumbs {
+  list-style: none; margin: 0; padding: 0; display: grid;
+  grid-template-columns: repeat(auto-fill, 72px); justify-content: start; gap: 0.4rem;
+}
+.lc-thumbs a {
+  display: block; width: 72px; height: 72px; aspect-ratio: 1;
+  border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
+  background: var(--paper); cursor: zoom-in;
+}
 .lc-thumbs a:hover, .lc-thumbs a:focus-visible { border-color: var(--stamp); outline: none; box-shadow: 0 0 0 2px var(--stamp); }
-.lc-thumbs img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.lc-thumbs img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .lc-material-pane .lc-material-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; padding-bottom: 0.35rem; border-bottom: 1px dashed var(--line); }
 .lc-material-pane .lc-material-list li:last-child { border-bottom: 0; padding-bottom: 0; }
 /* lightbox */
