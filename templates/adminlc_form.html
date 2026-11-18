@@ -14,6 +14,7 @@
   <p class="hint"><a href="/adminlc">← Voltar ao painel</a></p>
   <h1>{{ "Editar leitura coletiva" if lc else "Nova leitura coletiva" }}</h1>
 
+  {% if msg %}<div class="notice-box">{{ msg }}</div>{% endif %}
   {% if errors %}<div class="warning-box">{% for e in errors %}{{ e }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
 
   <form method="post" enctype="multipart/form-data"
@@ -128,6 +129,54 @@
       <a class="btn secondary" href="/adminlc">Cancelar</a>
     </div>
   </form>
+</div>
+
+<div class="card lc-form lc-material-admin" id="material">
+  <h2>Material de apoio</h2>
+  {% if lc %}
+  <p class="hint">PDFs e imagens (JPG, PNG, WEBP ou GIF), até {{ MATERIAL_MAX_MB }} MB cada e {{ MATERIAL_MAX_PER_READING }} por leitura. Aparecem na página pública da leitura, ao lado da capa.</p>
+  {% if material_notice %}<div class="notice-box">{{ material_notice }}</div>{% endif %}
+  {% if material_problems %}<div class="warning-box">{% for p in material_problems %}{{ p }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>{% endif %}
+
+  {% if lc.materials %}
+  <ul class="book-list">
+    {% for m in lc.materials %}
+    <li class="book-row lc-admin-row">
+      {% if m.is_pdf %}
+      <span class="lc-admin-thumb lc-admin-thumb-empty" aria-hidden="true">📄</span>
+      {% else %}
+      <img src="{{ m.url }}" alt="" class="lc-admin-thumb" loading="lazy">
+      {% endif %}
+      <div class="book-row-text">
+        <form method="post" action="/adminlc/lc/{{ lc.id }}/material/{{ m.id }}/rename" class="reject-form">
+          <input type="text" name="title" value="{{ m.title }}" maxlength="120" aria-label="Título do material">
+          <button type="submit" class="secondary">Renomear</button>
+        </form>
+        <span class="isbn">{{ "PDF" if m.is_pdf else "Imagem" }} · {{ m.size_label }} · <a href="{{ m.url }}" target="_blank" rel="noopener" style="text-decoration:underline;">abrir</a></span>
+        <div class="lc-actions">
+          <form method="post" action="/adminlc/lc/{{ lc.id }}/material/{{ m.id }}/delete" onsubmit="return confirm('Remover este material? O arquivo será apagado.');">
+            <button type="submit" class="secondary">Remover</button>
+          </form>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">Nenhum material enviado ainda.</p>
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data" action="/adminlc/lc/{{ lc.id }}/material" style="margin-top:1rem;">
+    <label for="material_files">Enviar arquivos</label>
+    <input type="file" id="material_files" name="files" multiple required
+           accept="application/pdf,image/jpeg,image/png,image/webp,image/gif">
+    <label for="material_title">Título (opcional — vale quando enviar um arquivo só; senão usa o nome do arquivo)</label>
+    <input type="text" id="material_title" name="title" maxlength="120">
+    <div class="lc-actions"><button type="submit">Enviar material</button></div>
+  </form>
+  {% else %}
+  <p class="hint">Salve a leitura primeiro; depois dá para anexar o material de apoio aqui.</p>
+  {% endif %}
 </div>
 
 <script>

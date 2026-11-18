@@ -1,20 +1,25 @@
 """Rotas de Leituras Coletivas: páginas públicas (/lc...) e administração
 (/adminlc...). Montado no main.py via build_router(templates, limiter)."""
+import logging
 import os
+import re
 from datetime import date
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
 from . import cover_search
+from . import media
+from . import storage
 from . import lc_suggestions as lcs
 from . import schedule_parser
 from .database import get_db
-from .models import CollectiveReading, LCAdmin, LCCategory, LCStage
+from .models import CollectiveReading, LCAdmin, LCCategory, LCMaterial, LCStage
 
 MSGS = {
     "created": "Leitura cadastrada.",
@@ -35,6 +40,9 @@ MSGS = {
     "suggestion_dismissed": "Sugestão dispensada. Dá para reconsiderar em \"Dispensadas\".",
     "suggestion_restored": "Sugestão voltou para a lista.",
     "suggestion_gone": "Essa sugestão já foi tratada (talvez por outro administrador).",
+    "material_none": "Escolha pelo menos um arquivo para enviar.",
+    "material_renamed": "Título do material atualizado.",
+    "material_deleted": "Material removido.",
 }
 
 
@@ -44,6 +52,58 @@ def _cookie_secure() -> bool:
 
 def br_date(value: Optional[date]) -> str:
     return value.strftime("%d/%m/%Y") if value else ""
+
+
+# --------------------------------------------------------- material de apoio
+
+try:
+    MATERIAL_MAX_MB = max(1, int(os.environ.get("MATERIAL_MAX_MB", "20")))
+except ValueError:
+    MATERIAL_MAX_MB = 20
+MATERIAL_MAX_BYTES = MATERIAL_MAX_MB * 1024 * 1024
+MATERIAL_MAX_PER_READING = 30
+
+
+def _material_title(filename: str) -> str:
+    stem = os.path.splitext(os.path.basename(filename or ""))[0]
+    stem = re.sub(r"[_\-]+", " ", stem).strip()
+    return (stem or "Material")[:120]
+
+
+def _material_original_name(filename: str, ext: str) -> str:
+    """Nome do download: o que o admin enviou, sem caminho nem caracteres de
+    controle, garantindo a extensão certa."""
+    base = os.path.basename((filename or "").replace("\\", "/"))
+    base = re.sub(r"[\x00-\x1f\x7f\"<>|:*?]", "", base).strip()[:150]
+    stem = os.path.splitext(base)[0] or "material"
+    return f"{stem}.{ext}"
+
+
+def _disposition(original: str, attachment: bool) -> str:
+    ascii_name = re.sub(r"[^A-Za-z0-9._ -]", "_", original)[:100] or "arquivo"
+    return f"{'attachment' if attachment else 'inline'}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(original)}"
+
+
+def _material_flash(q) -> tuple[Optional[str], list[str]]:
+    """Resultado do último envio, vindo de contadores (inteiros) na URL — nunca
+    texto livre —, para a página não refletir conteúdo escolhido por terceiros."""
+    def n(key: str) -> int:
+        try:
+            return max(0, min(int(q.get(key, "0")), 99))
+        except ValueError:
+            return 0
+
+    notice = f"{n('ok')} arquivo(s) enviado(s)." if n("ok") else None
+    problems = []
+    if n("type"):
+        problems.append(f"{n('type')} arquivo(s) ignorado(s): só aceito PDF, JPG, PNG, WEBP e GIF.")
+    if n("size"):
+        problems.append(f"{n('size')} arquivo(s) ignorado(s): passam de {MATERIAL_MAX_MB} MB.")
+    if n("limit"):
+        problems.append(f"{n('limit')} arquivo(s) ignorado(s): limite de {MATERIAL_MAX_PER_READING} por leitura.")
+    if n("fail"):
+        problems.append(f"{n('fail')} arquivo(s) não gravados: armazenamento indisponível — tente de novo.")
+    return notice, problems
 
 
 def build_router(templates, limiter) -> APIRouter:
@@ -57,6 +117,8 @@ def build_router(templates, limiter) -> APIRouter:
     templates.env.globals["split_featured"] = lc.split_featured
     templates.env.globals["stage_unit"] = lc.stage_unit
     templates.env.globals["schedule_ai_enabled"] = schedule_parser.CONFIGURED
+    templates.env.globals["MATERIAL_MAX_MB"] = MATERIAL_MAX_MB
+    templates.env.globals["MATERIAL_MAX_PER_READING"] = MATERIAL_MAX_PER_READING
 
     # ------------------------------------------------------------ dependências
 
@@ -100,6 +162,33 @@ def build_router(templates, limiter) -> APIRouter:
         if not reading:
             raise HTTPException(status_code=404, detail="Leitura coletiva não encontrada.")
         return render(request, "lc_detail.html", lc=reading, progress=lc.reading_progress(reading))
+
+    @router.get("/lc/{reading_id}/material/{material_id}")
+    def public_material(
+        reading_id: str, material_id: str, download: int = 0, db: Session = Depends(get_db)
+    ):
+        """Abre (ou baixa, com ?download=1) um material de apoio. Passa pelo
+        banco para dar ao arquivo o nome original e garantir que o material
+        pertence mesmo àquela leitura."""
+        m = db.query(LCMaterial).filter(LCMaterial.id == material_id, LCMaterial.reading_id == reading_id).first()
+        if not m:
+            raise HTTPException(404, "Material não encontrado.")
+        if storage.is_public_mode():
+            return RedirectResponse(storage.public_url(storage.KIND_MATERIAL, m.filename), status_code=302)
+        obj = storage.open_object(storage.KIND_MATERIAL, m.filename)
+        if not obj:
+            raise HTTPException(404, "Arquivo não encontrado.")
+        ext = m.filename.rsplit(".", 1)[-1]
+        headers = {
+            "Content-Disposition": _disposition(m.original_name or f"{_material_title(m.title)}.{ext}", bool(download)),
+            "Cache-Control": "public, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if obj.local_path:
+            return FileResponse(obj.local_path, media_type=obj.content_type, headers=headers)
+        if obj.size is not None:
+            headers["Content-Length"] = str(obj.size)
+        return StreamingResponse(obj.chunks(), media_type=obj.content_type, headers=headers)
 
     # ------------------------------------------------------------ login/logout
 
@@ -250,14 +339,14 @@ def build_router(templates, limiter) -> APIRouter:
         upload = form.get("cover_file")
         if isinstance(upload, UploadFile) and upload.filename:
             data = await upload.read(lc.MAX_COVER_BYTES + 1)
-            name = lc.save_cover_bytes(data) if data else None
+            name = await lc.asave_cover_bytes(data) if data else None
             if not name:
                 return cur_file, cur_url, None, "Capa inválida: envie JPG, PNG, WEBP ou GIF de até 5 MB.", None
             return name, None, old_file, None, None
 
         if v["cover_choice"]:
             data = await cover_search.fetch_candidate(v["cover_choice"])
-            name = lc.save_cover_bytes(data) if data else None
+            name = await lc.asave_cover_bytes(data) if data else None
             if not name:
                 return cur_file, cur_url, None, (
                     "Não consegui baixar a capa sugerida escolhida — tente de novo, escolha outra ou envie um arquivo."
@@ -284,7 +373,7 @@ def build_router(templates, limiter) -> APIRouter:
         upload = form.get("schedule_image_file")
         if isinstance(upload, UploadFile) and upload.filename:
             data = await upload.read(lc.MAX_SCHEDULE_IMAGE_BYTES + 1)
-            name = lc.save_cover_bytes(data, lc.MAX_SCHEDULE_IMAGE_BYTES) if data else None
+            name = await lc.asave_cover_bytes(data, lc.MAX_SCHEDULE_IMAGE_BYTES) if data else None
             if not name:
                 return old_file, None, "Imagem do cronograma inválida: envie JPG, PNG, WEBP ou GIF de até 10 MB."
             return name, old_file, None
@@ -319,7 +408,7 @@ def build_router(templates, limiter) -> APIRouter:
                 errors.append(sched_err)
                 # a capa nova já foi gravada em disco: não deixa arquivo órfão
                 if cover_file and cover_file != (reading.cover_filename if reading else None):
-                    lc.delete_cover_file(cover_file)
+                    await lc.adelete_cover_file(cover_file)
         if errors:
             return render(
                 request, "adminlc_form.html", status_code=400,
@@ -349,8 +438,8 @@ def build_router(templates, limiter) -> APIRouter:
             for i, s in enumerate(stages)
         ]
         db.commit()
-        lc.delete_cover_file(old_file if old_file != cover_file else None)
-        lc.delete_cover_file(old_sched if old_sched != sched_file else None)
+        await lc.adelete_cover_file(old_file if old_file != cover_file else None)
+        await lc.adelete_cover_file(old_sched if old_sched != sched_file else None)
         lc.sync_reading_states(db)  # data de início já passada → em andamento
         return go("/adminlc", notice or ("created" if creating else "updated"))
 
@@ -431,9 +520,11 @@ def build_router(templates, limiter) -> APIRouter:
                 for s in r.stages
             ],
         }
+        material_notice, material_problems = _material_flash(request.query_params)
         return render(
             request, "adminlc_form.html", admin=admin, lc=r, values=values, errors=[],
             categories=lc.list_categories(db),
+            material_notice=material_notice, material_problems=material_problems,
         )
 
     @router.post("/adminlc/lc/{reading_id}/edit")
@@ -584,11 +675,96 @@ def build_router(templates, limiter) -> APIRouter:
     ):
         r = _get_reading(db, reading_id)
         old_file, old_sched = r.cover_filename, r.schedule_image_filename
+        material_files = [m.filename for m in r.materials]
         db.delete(r)
         db.commit()
         lc.delete_cover_file(old_file)
         lc.delete_cover_file(old_sched)
+        for f in material_files:
+            storage.delete(storage.KIND_MATERIAL, f)
         return go("/adminlc", "deleted")
+
+    # --------------------------------------------------- material de apoio (admin)
+
+    def _edit_url(reading_id: str, query: str = "") -> RedirectResponse:
+        return RedirectResponse(f"/adminlc/lc/{reading_id}/edit{'?' + query if query else ''}#material", status_code=303)
+
+    @router.post("/adminlc/lc/{reading_id}/material")
+    @limiter.limit("20/minute")
+    async def add_material(
+        request: Request, reading_id: str,
+        admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db),
+    ):
+        r = _get_reading(db, reading_id)
+        form = await request.form()
+        uploads = [f for f in form.getlist("files") if isinstance(f, UploadFile) and f.filename]
+        if not uploads:
+            return _edit_url(reading_id, "msg=material_none")
+        custom_title = str(form.get("title", "")).strip()[:120]
+        count = {"ok": 0, "type": 0, "size": 0, "limit": 0, "fail": 0}
+        position = max([m.position for m in r.materials], default=-1) + 1
+        total = len(r.materials)
+        for up in uploads:
+            if total >= MATERIAL_MAX_PER_READING:
+                count["limit"] += 1
+                continue
+            data = await up.read(MATERIAL_MAX_BYTES + 1)
+            if len(data) > MATERIAL_MAX_BYTES:
+                count["size"] += 1
+                continue
+            ext = media.sniff_material_ext(data)
+            if not ext:
+                count["type"] += 1
+                continue
+            try:
+                stored = await media.asave_material(data, ext)
+            except storage.StorageError:
+                logging.getLogger("bookvote.lc").exception("Falha ao gravar material")
+                count["fail"] += 1
+                continue
+            db.add(LCMaterial(
+                reading_id=r.id,
+                title=custom_title if (custom_title and len(uploads) == 1) else _material_title(up.filename),
+                filename=stored,
+                original_name=_material_original_name(up.filename, ext),
+                kind="pdf" if ext == "pdf" else "image",
+                size_bytes=len(data),
+                position=position,
+                created_by=admin.id,
+            ))
+            position += 1
+            total += 1
+            count["ok"] += 1
+        db.commit()
+        return _edit_url(reading_id, "&".join(f"{k}={v}" for k, v in count.items() if v))
+
+    @router.post("/adminlc/lc/{reading_id}/material/{material_id}/rename")
+    async def rename_material(
+        request: Request, reading_id: str, material_id: str,
+        admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db),
+    ):
+        m = db.query(LCMaterial).filter(LCMaterial.id == material_id, LCMaterial.reading_id == reading_id).first()
+        if not m:
+            raise HTTPException(404, "Material não encontrado.")
+        title = str((await request.form()).get("title", "")).strip()[:120]
+        if title:
+            m.title = title
+            db.commit()
+        return _edit_url(reading_id, "msg=material_renamed" if title else "")
+
+    @router.post("/adminlc/lc/{reading_id}/material/{material_id}/delete")
+    def delete_material(
+        reading_id: str, material_id: str,
+        admin: LCAdmin = Depends(require_admin), db: Session = Depends(get_db),
+    ):
+        m = db.query(LCMaterial).filter(LCMaterial.id == material_id, LCMaterial.reading_id == reading_id).first()
+        if not m:
+            raise HTTPException(404, "Material não encontrado.")
+        stored = m.filename
+        db.delete(m)
+        db.commit()
+        storage.delete(storage.KIND_MATERIAL, stored)
+        return _edit_url(reading_id, "msg=material_deleted")
 
     # ------------------------------------------------------- administradores
 

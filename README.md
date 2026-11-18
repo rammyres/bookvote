@@ -20,7 +20,8 @@ numa única instância pequena (Docker + nginx na frente).
   PNG, WEBP ou GIF, até 5 MB) — ela substitui a capa do Google Books — e o
   organizador pode enviar, trocar ou remover a imagem de **qualquer**
   indicação pelo painel (`/admin/<token>`), em qualquer fase. Os arquivos
-  ficam em `/data/book_images` (mesmo volume do banco) e aparecem na lista
+  ficam no armazenamento configurado (pasta `/data/book_images` por padrão, ou
+  bucket — veja "Armazenamento de arquivos") e aparecem na lista
   de indicações, nas votações, na apuração e no resultado.
 - **Capas sugeridas** (indicação e cadastro de LC): ao escolher o livro (ou
   clicar em "Buscar capas"), o formulário mostra miniaturas de capas achadas
@@ -141,6 +142,33 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   ou nome de capítulo ("1" a "5", "Prólogo" a "Parte II"). Se o início/fim
   geral da leitura estiverem vazios, usam-se os da primeira e da última
   semana (e isso alimenta o fluxo automático de status).
+- **Leitura automática da imagem do cronograma** (opcional): com
+  `GEMINI_API_KEY` no `.env`, o formulário ganha o botão "Preencher semanas a
+  partir da imagem", que sugere as semanas para você revisar antes de salvar.
+  Os modelos formam uma **cadeia**: `GEMINI_MODEL` (principal) →
+  `GEMINI_FALLBACK_MODEL` (reserva 1) → `GEMINI_FALLBACK_MODEL_2` (reserva 2).
+  O app passa ao próximo quando o anterior falha por alta demanda (429),
+  timeout, erro do servidor (5xx), resposta ilegível, **modelo aposentado ou
+  inexistente (404)** ou recusa (400); um 400 por causa do parâmetro de
+  raciocínio (`thinkingConfig`) é repetido no mesmo modelo sem ele. Chave
+  inválida, 401/403 e imagem sem tabela encerram na hora, sem gastar as
+  reservas. Em branco usa os padrões (`gemini-3.8-flash` →
+  `gemini-3.5-flash` → `gemini-3.5-flash-lite`); `none` desliga uma posição;
+  nomes repetidos são ignorados. Os nomes do Gemini giram rápido (o antigo
+  padrão `gemini-2.5-flash` já foi desligado pelo Google), então confira
+  de tempos em tempos a lista de modelos e de descontinuações; o log mostra
+  qual reserva respondeu.
+- **Material de apoio** (PDFs e imagens): na tela de edição da leitura
+  (`/adminlc/lc/<id>/edit`), o cartão "Material de apoio" permite enviar
+  vários arquivos de uma vez (PDF, JPG, PNG, WEBP ou GIF; até
+  `MATERIAL_MAX_MB`, padrão 20 MB, e 30 por leitura), renomear e remover.
+  Qualquer administrador de LC pode. Na página pública da leitura o bloco
+  aparece na coluna ao lado da capa, junto da categoria: PDFs como lista
+  (com tamanho) e imagens como miniaturas. O tipo é conferido pelo conteúdo
+  do arquivo (não pelo nome nem pelo Content-Type), SVG é recusado, e o
+  download usa o nome original do arquivo (`?download=1` força baixar).
+  Apagar a leitura apaga também os materiais. O envio só existe para uma
+  leitura já salva (o cartão aparece depois do primeiro "Cadastrar").
 - **Barra de progresso** (página da leitura, só em andamento): com o
   cronograma detalhado, acompanha as semanas — "Semana X de N", trecho da
   semana, divisões na barra e a tabela com a semana atual destacada; sem ele,
@@ -181,6 +209,57 @@ docker compose exec web python scripts/manage.py list-lc-admins
 Upload de capa atrás do nginx precisa de `client_max_body_size` (já no
 `deploy/nginx-bookvote.conf` de exemplo; se você já copiou o arquivo antes,
 adicione `client_max_body_size 6m;` no `server` e recarregue o nginx).
+
+## Armazenamento de arquivos (local, Cloudflare R2 ou Google Cloud Storage)
+
+Tudo que é enviado — imagens das indicações, capas e imagens de cronograma
+das LCs, material de apoio — passa por `app/storage.py`. O backend é
+escolhido no `.env`:
+
+| `STORAGE_BACKEND` | onde ficam os arquivos |
+|---|---|
+| `local` (padrão) | pastas dentro de `BOOKVOTE_DATA_DIR` (`book_images/`, `lc_covers/`, `lc_materials/`) |
+| `r2` | Cloudflare R2 (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `STORAGE_BUCKET`) |
+| `gcs` | Google Cloud Storage (`GCS_HMAC_ACCESS_KEY`, `GCS_HMAC_SECRET`, `STORAGE_BUCKET`) |
+
+R2 e GCS são acessados pela API S3 (boto3): no R2 é o modo nativo; no GCS é a
+"interoperabilidade" com **chaves HMAC** de uma conta de serviço (Cloud
+Storage → Configurações → Interoperabilidade; a conta precisa do papel
+*Storage Object Admin* no bucket). Um caminho de código só para os dois.
+Configuração incompleta derruba a subida com a lista do que falta.
+`STORAGE_PREFIX` (opcional) guarda tudo numa "pasta" do bucket.
+
+**Como os arquivos chegam ao navegador** (`STORAGE_PUBLIC_BASE_URL`):
+
+- *vazio (padrão)*: o próprio app entrega (`/media/...` e
+  `/lc/<id>/material/<id>`), lendo do bucket. Funciona com bucket
+  **privado**, não muda nenhuma URL existente e dá nome ao download do
+  material. Cabeçalhos de cache imutável (os nomes são aleatórios), então o
+  Cloudflare na frente absorve quase todo o tráfego.
+- *preenchido* (domínio público do R2, bucket público do GCS ou CDN): as
+  páginas apontam direto para o bucket e o servidor sai do caminho. Exige
+  bucket legível publicamente e que os arquivos antigos já tenham sido
+  migrados.
+
+**Trocando do disco para um bucket** (sem parar o site):
+
+1. Crie o bucket e as chaves; preencha o `.env` (veja `.env.example`) e
+   reinicie o app. A partir daí, tudo que for enviado vai para o bucket e
+   o que ainda estiver só no disco continua sendo lido de lá
+   (`STORAGE_LOCAL_FALLBACK=true`, padrão).
+2. `python scripts/manage.py storage-check` — grava, lê e apaga um arquivo de
+   teste (e confere a URL pública, se configurada).
+3. `python scripts/manage.py storage-migrate --dry-run`, depois sem
+   `--dry-run`: envia o que está no disco (pula o que já está lá com o mesmo
+   tamanho; pode repetir à vontade) e termina conferindo que **tudo que o
+   banco referencia existe** no armazenamento.
+4. Quando estiver satisfeito: `storage-migrate --delete-local` libera o
+   disco (só apaga o que foi confirmado no bucket).
+
+Se o bucket cair, quem envia vê "armazenamento indisponível" (HTTP 503) e
+nada fica pela metade (nenhuma indicação/LC criada sem a imagem).
+O backup dos arquivos passa a ser do próprio bucket (versionamento/regras de
+ciclo de vida do provedor); o `.env` e o banco continuam como antes.
 
 ## Notificações automáticas de mudança de fase
 
@@ -358,9 +437,10 @@ Dados ficam no volume Docker `bookvote_data` (SQLite):
 ```bash
 docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
   cp /data/bookvote.db /backup/bookvote-backup.db
-# capas das leituras coletivas e imagens das indicações (se houver):
+# arquivos enviados que ainda estão no disco (capas, imagens das indicações,
+# material de apoio) — com STORAGE_BACKEND=r2/gcs o backup é do bucket:
 docker run --rm -v bookvote_data:/data -v $PWD:/backup alpine \
-  tar czf /backup/imagens-backup.tgz -C /data lc_covers book_images
+  tar czf /backup/imagens-backup.tgz -C /data lc_covers book_images lc_materials
 ```
 
 ### Atualizando depois de mudar o código

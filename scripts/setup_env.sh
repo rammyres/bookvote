@@ -160,6 +160,16 @@ esc() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+# Variáveis que este script não gerencia (GEMINI_*, STORAGE_*, R2_*, GCS_*,
+# MATERIAL_MAX_MB...) são lidas ANTES de reescrever o arquivo e devolvidas no
+# fim, como texto, sem interpretar nada — senão uma nova execução apagaria
+# a configuração do bucket e da leitura automática do cronograma.
+EXTRA_LINES=""
+if [[ -f "$ENV_FILE" ]]; then
+  EXTRA_LINES="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null \
+    | grep -Ev '^(BOOKVOTE_SECRET_KEY|TURNSTILE_SITE_KEY|TURNSTILE_SECRET_KEY|BOOKVOTE_COOKIE_SECURE|BOOKVOTE_MAX_VOTERS_PER_IP|GOOGLE_BOOKS_API_KEY|RESEND_API_KEY|RESEND_FROM_EMAIL|BOOKVOTE_BASE_URL)=' || true)"
+fi
+
 cat > "$ENV_FILE" <<EOF
 BOOKVOTE_SECRET_KEY=$(esc "$SECRET_KEY")
 TURNSTILE_SITE_KEY=$(esc "$TURNSTILE_SITE")
@@ -171,6 +181,10 @@ RESEND_API_KEY=$(esc "$RESEND_KEY")
 RESEND_FROM_EMAIL=$(esc "$RESEND_FROM")
 BOOKVOTE_BASE_URL=$(esc "$BASE_URL")
 EOF
+
+if [[ -n "$EXTRA_LINES" ]]; then
+  printf '\n# preservado do .env anterior (não gerenciado por este script)\n%s\n' "$EXTRA_LINES" >> "$ENV_FILE"
+fi
 
 chmod 600 "$ENV_FILE"
 echo ".env escrito em $ENV_FILE (permissão 600)."

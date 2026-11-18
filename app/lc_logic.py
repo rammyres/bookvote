@@ -20,6 +20,9 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from .database import DATA_DIR
+from starlette.concurrency import run_in_threadpool
+
+from . import storage
 from .media import delete_image, save_image, sniff_image_ext  # noqa: F401  (sniff re-exportado)
 from .models import CollectiveReading, LCAdmin, LCCategory, SiteSetting
 from .security import SECRET_KEY
@@ -471,8 +474,9 @@ def admin_from_token(db: Session, token: Optional[str]) -> Optional[LCAdmin]:
 
 # -------------------------------------------------------------------- capas
 
-COVERS_DIR = os.path.join(DATA_DIR, "lc_covers")
-os.makedirs(COVERS_DIR, exist_ok=True)
+# Pasta no disco das capas (só vale com STORAGE_BACKEND=local ou como origem da
+# migração para o bucket). Mantida por compatibilidade.
+COVERS_DIR = storage.local_dir(storage.KIND_COVER)
 
 MAX_COVER_BYTES = 5 * 1024 * 1024
 MAX_SCHEDULE_IMAGE_BYTES = 10 * 1024 * 1024  # cronograma costuma ser um print/arte grande
@@ -483,11 +487,20 @@ def save_cover_bytes(data: bytes, max_bytes: int = MAX_COVER_BYTES) -> Optional[
     """Grava a imagem com nome aleatório e devolve o nome do arquivo, ou
     None se não for uma imagem aceita. Serve para capas e para a imagem do
     cronograma (mesmo diretório, limite de tamanho diferente)."""
-    return save_image(data, COVERS_DIR, max_bytes)
+    return save_image(data, storage.KIND_COVER, max_bytes)
 
 
 def delete_cover_file(filename: Optional[str]) -> None:
-    delete_image(COVERS_DIR, filename)
+    delete_image(storage.KIND_COVER, filename)
+
+
+# versões para código async (o bucket é acesso bloqueante: roda em thread)
+async def asave_cover_bytes(data: bytes, max_bytes: int = MAX_COVER_BYTES) -> Optional[str]:
+    return await run_in_threadpool(save_cover_bytes, data, max_bytes)
+
+
+async def adelete_cover_file(filename: Optional[str]) -> None:
+    await run_in_threadpool(delete_cover_file, filename)
 
 
 def is_google_image_url(url: str) -> bool:
@@ -526,4 +539,4 @@ async def download_google_cover(url: str) -> Optional[str]:
             data = resp.content
             if sniff_image_ext(data) and len(data) <= MAX_COVER_BYTES and (best is None or len(data) > len(best)):
                 best = data
-    return save_cover_bytes(best) if best else None
+    return await asave_cover_bytes(best) if best else None

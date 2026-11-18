@@ -14,6 +14,8 @@ Uso (dentro do container, via docker compose):
   docker compose exec bookvote python scripts/manage.py delete-raffle <id>
   docker compose exec bookvote python scripts/manage.py lc-main-admin <usuario>
   docker compose exec bookvote python scripts/manage.py list-lc-admins
+  docker compose exec bookvote python scripts/manage.py storage-check
+  docker compose exec bookvote python scripts/manage.py storage-migrate [--dry-run] [--delete-local]
 
 Fora do Docker (rodando local com o mesmo BOOKVOTE_DATA_DIR do servidor),
 funciona igual, direto com `python scripts/manage.py ...`.
@@ -29,8 +31,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import Base, SessionLocal, engine  # noqa: E402
-from app.models import Book, DrawLog, LCAdmin, LCSuggestion, Poll, Raffle, RaffleDraw, RaffleEntry, Vote, VoterIdentity  # noqa: E402
+from app.models import Book, CollectiveReading, DrawLog, LCAdmin, LCMaterial, LCSuggestion, Poll, Raffle, RaffleDraw, RaffleEntry, Vote, VoterIdentity  # noqa: E402
 from app import media  # noqa: E402
+from app import storage  # noqa: E402
 from app import lc_logic as lcl  # noqa: E402
 from app import poll_logic as pl  # noqa: E402
 from app import raffle_logic as rl  # noqa: E402
@@ -114,7 +117,7 @@ def delete_poll(args: argparse.Namespace) -> None:
         db.delete(poll)  # cascade="all, delete-orphan" cuida de books/votes/draws
         db.commit()
         for f in image_files:  # imagens enviadas nas indicações
-            media.delete_image(media.BOOK_IMAGES_DIR, f)
+            media.delete_image(storage.KIND_BOOK, f)
         print("Enquete apagada.")
     finally:
         db.close()
@@ -202,6 +205,117 @@ def lc_main_admin(args: argparse.Namespace) -> None:
         db.close()
 
 
+def storage_check(args: argparse.Namespace) -> None:
+    """Confere credenciais, bucket e (se configurada) a URL pública, gravando
+    e apagando um arquivo de teste. Rode antes de migrar."""
+    import secrets
+
+    name = storage.backend_name()
+    print(f"Backend configurado: {name}")
+    if name == "local":
+        print(f"Armazenamento local em {os.path.dirname(storage.local_dir('x'))} — nada a verificar.")
+        print("Para usar um bucket, defina STORAGE_BACKEND=r2 ou gcs no .env (veja .env.example).")
+        return
+    remote = storage.remote_backend()
+    probe = f"{secrets.token_hex(12)}.png"
+    payload = b"bookvote storage-check"
+    kind = storage.KIND_BOOK
+    ok = True
+    try:
+        remote.put(kind, probe, payload, "image/png")
+        print(f"  [ok] gravação no bucket '{remote.bucket}' (chave {remote.key(kind, probe)})")
+        got = remote.get(kind, probe)
+        print("  [ok] leitura confere" if got == payload else "  [FALHOU] o conteúdo lido é diferente do gravado")
+        ok = ok and got == payload
+        if storage.is_public_mode():
+            import httpx
+
+            url = storage.public_url(kind, probe)
+            try:
+                r = httpx.get(url, timeout=10, follow_redirects=True)
+                if r.status_code == 200 and r.content == payload:
+                    print(f"  [ok] URL pública responde: {url}")
+                else:
+                    ok = False
+                    print(f"  [FALHOU] URL pública devolveu {r.status_code}: {url}")
+                    print("           O bucket/domínio está realmente público? STORAGE_PUBLIC_BASE_URL aponta para a raiz do bucket (+ STORAGE_PREFIX)?")
+            except httpx.HTTPError as exc:
+                ok = False
+                print(f"  [FALHOU] não consegui abrir a URL pública ({type(exc).__name__}): {url}")
+        remote.delete(kind, probe)
+        gone = remote.get(kind, probe) is None
+        print("  [ok] remoção" if gone else "  [FALHOU] o arquivo de teste não foi removido")
+        ok = ok and gone
+    except storage.StorageError as exc:
+        ok = False
+        print(f"  [FALHOU] {exc}")
+        print("  Confira STORAGE_BUCKET, as chaves e o nome do bucket (e, no GCS, o papel da conta de serviço).")
+    print("Tudo certo." if ok else "Há problemas — corrija antes de migrar.")
+    sys.exit(0 if ok else 1)
+
+
+def _referenced_files(db) -> list[tuple[str, str]]:
+    """(tipo, arquivo) de tudo que o banco referencia."""
+    refs: list[tuple[str, str]] = []
+    refs += [(storage.KIND_BOOK, f) for (f,) in db.query(Book.image_filename).filter(Book.image_filename.isnot(None)).all()]
+    for cover, sched in db.query(CollectiveReading.cover_filename, CollectiveReading.schedule_image_filename).all():
+        refs += [(storage.KIND_COVER, f) for f in (cover, sched) if f]
+    refs += [(storage.KIND_MATERIAL, f) for (f,) in db.query(LCMaterial.filename).all()]
+    return refs
+
+
+def storage_migrate(args: argparse.Namespace) -> None:
+    """Envia para o bucket tudo que está no disco (book_images, lc_covers,
+    lc_materials). Pode rodar de novo à vontade: o que já está lá com o mesmo
+    tamanho é pulado. --delete-local só apaga do disco o que foi confirmado
+    no bucket. No fim, confere se tudo que o banco referencia existe."""
+    if storage.backend_name() == "local":
+        print("STORAGE_BACKEND continua 'local': defina r2 ou gcs (e as credenciais) no .env e rode de novo.")
+        sys.exit(1)
+    Base.metadata.create_all(bind=engine)
+    remote, local = storage.remote_backend(), storage.local_backend()
+    total = sent = skipped = failed = deleted = 0
+    for kind in storage.KINDS:
+        for name in local.names(kind):
+            total += 1
+            lsize = local.size(kind, name)
+            try:
+                if remote.size(kind, name) == lsize:
+                    skipped += 1
+                elif args.dry_run:
+                    print(f"  [simulação] enviaria {kind}/{name} ({lsize} bytes)")
+                    continue
+                else:
+                    remote.put(kind, name, local.get(kind, name), storage.content_type_for(name))
+                    if remote.size(kind, name) != lsize:
+                        raise storage.StorageError("tamanho no bucket difere do original após o envio")
+                    sent += 1
+                if args.delete_local and not args.dry_run:
+                    local.delete(kind, name)
+                    deleted += 1
+            except storage.StorageError as exc:
+                failed += 1
+                print(f"  [FALHOU] {kind}/{name}: {exc}")
+    print(f"Arquivos no disco: {total} | enviados: {sent} | já estavam no bucket: {skipped} | falhas: {failed}"
+          + (f" | apagados do disco: {deleted}" if args.delete_local else ""))
+
+    db = SessionLocal()
+    try:
+        missing = [(k, f) for k, f in _referenced_files(db) if not storage.exists(k, f)]
+    finally:
+        db.close()
+    if missing:
+        print(f"ATENÇÃO: {len(missing)} arquivo(s) referenciados no banco não existem no armazenamento:")
+        for k, f in missing[:20]:
+            print(f"  {k}/{f}")
+    else:
+        print("Conferência: tudo que o banco referencia existe no armazenamento.")
+    if failed or missing:
+        sys.exit(1)
+    if not args.dry_run and not args.delete_local and sent:
+        print("Quando estiver satisfeito, rode de novo com --delete-local para liberar o disco.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -229,6 +343,17 @@ def main() -> None:
     )
     p_lc_main.add_argument("username")
     p_lc_main.set_defaults(func=lc_main_admin)
+
+    sub.add_parser(
+        "storage-check", help="Testa o bucket configurado (gravar, ler, apagar, URL pública)"
+    ).set_defaults(func=storage_check)
+
+    p_mig = sub.add_parser(
+        "storage-migrate", help="Envia para o bucket os arquivos que ainda estão no disco do servidor"
+    )
+    p_mig.add_argument("--dry-run", action="store_true", help="Só mostra o que seria enviado")
+    p_mig.add_argument("--delete-local", action="store_true", help="Apaga do disco o que já foi confirmado no bucket")
+    p_mig.set_defaults(func=storage_migrate)
 
     args = parser.parse_args()
     args.func(args)

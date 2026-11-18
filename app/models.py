@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from .database import Base
+from . import storage
 
 _SHORT_ID_ALPHABET = string.ascii_letters + string.digits  # base62
 
@@ -105,7 +106,7 @@ class Book(Base):
     author = Column(String, nullable=True)
     thumbnail_url = Column(String, nullable=True)
     # imagem enviada (por quem indicou ou pelo admin da enquete): arquivo em
-    # disco (media.BOOK_IMAGES_DIR) e tem prioridade sobre thumbnail_url, que
+    # armazenamento (app/storage.py) e tem prioridade sobre thumbnail_url, que
     # é só o link da miniatura do Google Books.
     image_filename = Column(String, nullable=True)
     submitted_by = Column(String, nullable=True)  # display name, optional
@@ -129,7 +130,7 @@ class Book(Base):
     def cover_src(self):
         """Imagem a exibir: upload (se houver) → miniatura do Google → None."""
         if self.image_filename:
-            return f"/media/books/{self.image_filename}"
+            return storage.public_url(storage.KIND_BOOK, self.image_filename)
         return self.thumbnail_url or None
 
 
@@ -385,6 +386,14 @@ class CollectiveReading(Base):
         lazy="selectin",
     )
 
+    # material de apoio (PDFs e imagens enviados pelos administradores)
+    materials = relationship(
+        "LCMaterial",
+        cascade="all, delete-orphan",
+        order_by="LCMaterial.position, LCMaterial.created_at",
+        lazy="selectin",
+    )
+
     state = Column(String, nullable=False, default="planned", index=True)
 
     # cronograma: período + texto livre com as etapas (ex.: uma por linha).
@@ -408,14 +417,51 @@ class CollectiveReading(Base):
 
     @property
     def schedule_image_src(self):
-        return f"/media/lc/{self.schedule_image_filename}" if self.schedule_image_filename else None
+        return storage.public_url(storage.KIND_COVER, self.schedule_image_filename)
 
     @property
     def cover_src(self):
         if self.cover_filename:
-            return f"/media/lc/{self.cover_filename}"
+            return storage.public_url(storage.KIND_COVER, self.cover_filename)
         return self.cover_url or None
 
+
+
+class LCMaterial(Base):
+    """Arquivo de apoio de uma leitura coletiva (PDF ou imagem), guardado no
+    armazenamento configurado (app/storage.py, tipo lc_materials)."""
+
+    __tablename__ = "lc_materials"
+
+    id = Column(String, primary_key=True, default=lambda: gen_short_id(8))
+    reading_id = Column(String, ForeignKey("collective_readings.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    filename = Column(String, nullable=False)  # nome no armazenamento (aleatório)
+    original_name = Column(String, nullable=True)  # nome que o admin enviou (vira o nome do download)
+    kind = Column(String, nullable=False, default="pdf")  # "pdf" | "image"
+    size_bytes = Column(Integer, nullable=False, default=0)
+    position = Column(Integer, nullable=False, default=0)
+    created_by = Column(String, nullable=True)  # LCAdmin.id (sem FK de propósito)
+    created_at = Column(DateTime, default=utcnow)
+
+    @property
+    def is_pdf(self) -> bool:
+        return self.kind == "pdf"
+
+    @property
+    def url(self) -> str:
+        """Link público. No modo de bucket público vai direto ao bucket; senão
+        passa pela rota do app (que consulta o banco e dá nome ao download)."""
+        if storage.is_public_mode():
+            return storage.public_url(storage.KIND_MATERIAL, self.filename)
+        return f"/lc/{self.reading_id}/material/{self.id}"
+
+    @property
+    def size_label(self) -> str:
+        n = self.size_bytes or 0
+        if n >= 1024 * 1024:
+            return f"{n / (1024 * 1024):.1f} MB".replace(".", ",")
+        return f"{max(1, round(n / 1024))} KB"
 
 
 class LCSuggestion(Base):

@@ -24,6 +24,34 @@
       {% endif %}
 
       {% if lc.description %}<p class="lc-text">{{ lc.description }}</p>{% endif %}
+
+      {% if lc.materials %}
+      <section class="lc-material" aria-label="Material de apoio">
+        <h2>Material de apoio</h2>
+        {% set pdfs = lc.materials|selectattr("is_pdf")|list %}
+        {% set imgs = lc.materials|rejectattr("is_pdf")|list %}
+        {% if pdfs %}
+        <ul class="lc-material-list">
+          {% for m in pdfs %}
+          <li>
+            <a href="{{ m.url }}" target="_blank" rel="noopener"><span aria-hidden="true">📄</span> {{ m.title }}</a>
+            <span class="hint">PDF · {{ m.size_label }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if imgs %}
+        <div class="lc-material-images">
+          {% for m in imgs %}
+          <a href="{{ m.url }}" target="_blank" rel="noopener" title="{{ m.title }}">
+            <img src="{{ m.url }}" alt="{{ m.title }}" loading="lazy">
+            <span>{{ m.title }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+      {% endif %}
     </div>
   </div>
 

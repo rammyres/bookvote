@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from . import lc_logic as lcl
 from . import poll_logic as pl
-from .media import BOOK_IMAGES_DIR, read_image
+from .media import KIND_BOOK, aread_image
 from .models import CollectiveReading, LCSuggestion, Poll, utcnow
 
 logger = logging.getLogger("bookvote.lc.suggestions")
@@ -101,8 +101,8 @@ async def _cover_for(book) -> tuple[Optional[str], Optional[str]]:
     miniatura do Google; se o download falhar, usa o link dela como reserva.
     Links que não são do Google não viram capa (mesma regra do cadastro)."""
     if book.image_filename:
-        data = read_image(BOOK_IMAGES_DIR, book.image_filename)
-        name = lcl.save_cover_bytes(data) if data else None
+        data = await aread_image(KIND_BOOK, book.image_filename)
+        name = await lcl.asave_cover_bytes(data) if data else None
         if name:
             return name, None
     thumb = book.thumbnail_url
@@ -134,7 +134,7 @@ async def confirm_suggestion(db: Session, suggestion_id: str, admin_id: str) -> 
         )
         if not claimed:  # perdeu a corrida para outro administrador
             db.rollback()
-            lcl.delete_cover_file(cover_file)
+            await lcl.adelete_cover_file(cover_file)
             return None
         reading = CollectiveReading(
             title=title,
@@ -153,7 +153,7 @@ async def confirm_suggestion(db: Session, suggestion_id: str, admin_id: str) -> 
         db.commit()
     except Exception:
         db.rollback()
-        lcl.delete_cover_file(cover_file)
+        await lcl.adelete_cover_file(cover_file)
         raise
     return reading
 

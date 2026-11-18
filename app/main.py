@@ -11,7 +11,7 @@ load_dotenv()  # no-op if vars are already set (e.g. by docker-compose's env_fil
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from fastapi import FastAPI, Request, Response, Form, File, UploadFile, Depends, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -29,6 +29,7 @@ from . import raffle_logic as rl
 from . import lc_logic as lcl
 from . import lc_suggestions as lcs
 from . import media
+from . import storage
 from . import cover_search
 from .lc_routes import build_router as build_lc_router
 from .book_search import search_books
@@ -167,11 +168,40 @@ app = FastAPI(title="Enquete de Livros")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-# capas das Leituras Coletivas (uploads/baixadas do Google) — ficam no volume de dados
-app.mount("/media/lc", StaticFiles(directory=lcl.COVERS_DIR), name="lc_covers")
-# imagens enviadas nas indicações (por quem indicou ou pelo admin da enquete) — mesmo volume de dados
-app.mount("/media/books", StaticFiles(directory=media.BOOK_IMAGES_DIR), name="book_images")
 app.include_router(build_lc_router(templates, limiter))
+
+
+@app.exception_handler(storage.StorageError)
+async def _storage_error_handler(request: Request, exc: storage.StorageError):
+    """Bucket fora do ar / credencial errada: o detalhe vai para o log, a
+    pessoa vê uma mensagem simples (e a indicação/LC não fica pela metade)."""
+    logging.getLogger("bookvote.storage").error("Falha no armazenamento: %s", exc)
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8><title>Armazenamento indisponível</title>"
+        "<p>O armazenamento de arquivos está indisponível no momento. "
+        "Nada foi perdido — tente de novo em instantes.</p><p><a href='javascript:history.back()'>Voltar</a></p>",
+        status_code=503,
+    )
+
+
+@app.get("/media/{route}/{filename}")
+def media_file(route: str, filename: str):
+    """Capas, cronogramas e imagens das indicações. Lê do armazenamento
+    configurado (disco, R2 ou GCS) — por isso funciona com bucket privado e
+    mantém as URLs de sempre. Os nomes são aleatórios e nunca mudam, então o
+    cache pode ser eterno."""
+    kind = storage.kind_for_route(route)
+    if not kind or not storage.valid_name(filename):
+        raise HTTPException(404)
+    obj = storage.open_object(kind, filename)
+    if not obj:
+        raise HTTPException(404)
+    headers = {"Cache-Control": storage.CACHE_CONTROL, "X-Content-Type-Options": "nosniff"}
+    if obj.local_path:
+        return FileResponse(obj.local_path, media_type=obj.content_type, headers=headers)
+    if obj.size is not None:
+        headers["Content-Length"] = str(obj.size)
+    return StreamingResponse(obj.chunks(), media_type=obj.content_type, headers=headers)
 
 MAX_VOTER_IDENTITIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_VOTERS_PER_IP", "6"))
 MAX_RAFFLE_ENTRIES_PER_IP = int(os.environ.get("BOOKVOTE_MAX_RAFFLE_ENTRIES_PER_IP", "6"))
@@ -1228,7 +1258,7 @@ async def nominate(
     image_name = None
     if isinstance(image_file, StarletteUploadFile) and image_file.filename:
         data = await image_file.read(media.MAX_BOOK_IMAGE_BYTES + 1)
-        image_name = media.save_image(data, media.BOOK_IMAGES_DIR, media.MAX_BOOK_IMAGE_BYTES) if data else None
+        image_name = await media.asave_image(data, storage.KIND_BOOK, media.MAX_BOOK_IMAGE_BYTES) if data else None
         if not image_name:
             return redirect_with_error(poll_id, "invalid_image")
         thumb_clean = None
@@ -1237,7 +1267,7 @@ async def nominate(
         # der para baixar agora, a indicação segue com a miniatura do Google,
         # como antes — uma fonte fora do ar não pode travar a indicação.
         data = await cover_search.fetch_candidate(cover_choice)
-        image_name = media.save_image(data, media.BOOK_IMAGES_DIR, media.MAX_BOOK_IMAGE_BYTES) if data else None
+        image_name = await media.asave_image(data, storage.KIND_BOOK, media.MAX_BOOK_IMAGE_BYTES) if data else None
         if image_name:
             thumb_clean = None
 
@@ -1256,7 +1286,7 @@ async def nominate(
         db.commit()
     except IntegrityError:
         db.rollback()
-        media.delete_image(media.BOOK_IMAGES_DIR, image_name)
+        await media.adelete_image(storage.KIND_BOOK, image_name)
         return redirect_with_error(poll_id, "duplicate")
 
     return carry_cookie(response, RedirectResponse(url=f"/p/{poll_id}", status_code=303))
@@ -1474,14 +1504,14 @@ async def admin_set_book_image(
     if not isinstance(image_file, StarletteUploadFile) or not image_file.filename:
         return redirect_admin_with_error(admin_token, "invalid_image")
     data = await image_file.read(media.MAX_BOOK_IMAGE_BYTES + 1)
-    name = media.save_image(data, media.BOOK_IMAGES_DIR, media.MAX_BOOK_IMAGE_BYTES) if data else None
+    name = await media.asave_image(data, storage.KIND_BOOK, media.MAX_BOOK_IMAGE_BYTES) if data else None
     if not name:
         return redirect_admin_with_error(admin_token, "invalid_image")
     old = book.image_filename
     book.image_filename = name
     book.thumbnail_url = None  # o upload substitui a miniatura do Google
     db.commit()
-    media.delete_image(media.BOOK_IMAGES_DIR, old)
+    await media.adelete_image(storage.KIND_BOOK, old)
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 
@@ -1497,7 +1527,7 @@ def admin_remove_book_image(admin_token: str, book_id: str, db: Session = Depend
     book.image_filename = None
     book.thumbnail_url = None
     db.commit()
-    media.delete_image(media.BOOK_IMAGES_DIR, old)
+    media.delete_image(storage.KIND_BOOK, old)
     return RedirectResponse(url=f"/admin/{admin_token}", status_code=303)
 
 

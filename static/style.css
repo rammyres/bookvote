@@ -974,3 +974,14 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 .cover-option-size { font-size: 0.62rem; color: #8a7c5c; }
 .cover-option.is-selected { border-color: var(--stamp); box-shadow: 0 0 0 2px var(--stamp); }
 .cover-option:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
+
+/* --- material de apoio (página da leitura e painel) --- */
+.lc-material { margin-top: 1.25rem; padding-top: 0.9rem; border-top: 1px solid var(--line); }
+.lc-material h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.lc-material-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.lc-material-list a { text-decoration: underline; }
+.lc-material-images { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.6rem; }
+.lc-material-images a { display: flex; flex-direction: column; align-items: center; width: 6.5rem; gap: 0.2rem; text-decoration: none; }
+.lc-material-images img { width: 100%; height: 8rem; object-fit: cover; border: 1px solid var(--line); border-radius: 3px; background: var(--paper-dim); }
+.lc-material-images span { font-size: 0.7rem; line-height: 1.15; text-align: center; color: #8a7c5c; overflow-wrap: anywhere; }
+.lc-material-admin .reject-form { margin-top: 0; }
