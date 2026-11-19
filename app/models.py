@@ -457,6 +457,11 @@ class LCMaterial(Base):
         return f"/lc/{self.reading_id}/material/{self.id}"
 
     @property
+    def thumb_url(self) -> str:
+        """Miniatura (JPEG) — sempre pela rota do app, que gera sob demanda."""
+        return f"/lc/{self.reading_id}/material/{self.id}/thumb"
+
+    @property
     def size_label(self) -> str:
         n = self.size_bytes or 0
         if n >= 1024 * 1024:

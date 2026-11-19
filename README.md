@@ -163,8 +163,14 @@ Vitrine de leituras coletivas do clube, com as **capas em destaque**.
   vários arquivos de uma vez (PDF, JPG, PNG, WEBP ou GIF; até
   `MATERIAL_MAX_MB`, padrão 20 MB, e 30 por leitura), renomear e remover.
   Qualquer administrador de LC pode. Na página pública da leitura o bloco
-  aparece na coluna ao lado da capa, junto da categoria: PDFs como lista
-  (com tamanho) e imagens como miniaturas. O tipo é conferido pelo conteúdo
+  aparece na coluna ao lado da capa, junto da categoria, como **um painel
+  único de miniaturas** (imagens e PDFs juntos; o PDF mostra a 1ª página com
+  a etiqueta "PDF"). Com mais de 8 arquivos só as 2 primeiras linhas ficam
+  visíveis até clicar em "Ver todos". Clicar numa imagem amplia (setas e Esc
+  funcionam); clicar num PDF abre o arquivo em nova aba. As miniaturas
+  (JPEG de 360 px, `<arquivo>_t.jpg` ao lado do original, requer `Pillow` e
+  `pypdfium2`) são geradas no envio e, para materiais já existentes, na
+  primeira visita à página. O tipo é conferido pelo conteúdo
   do arquivo (não pelo nome nem pelo Content-Type), SVG é recusado, e o
   download usa o nome original do arquivo (`?download=1` força baixar).
   Apagar a leitura apaga também os materiais. O envio só existe para uma

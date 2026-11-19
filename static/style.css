@@ -975,41 +975,53 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 .cover-option.is-selected { border-color: var(--stamp); box-shadow: 0 0 0 2px var(--stamp); }
 .cover-option:focus-visible { outline: 2px solid var(--stamp); outline-offset: 2px; }
 
-/* --- material de apoio (página da leitura e painel) --- */
-.lc-material { margin-top: 1.25rem; padding-top: 0.9rem; border-top: 1px solid var(--line); }
-.lc-material h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
-.lc-material-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
-.lc-material-list a { text-decoration: underline; }
-.lc-material-kind { margin: 0 0 0.4rem; font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; color: #5A4F3B; }
-.lc-material-count { display: inline-block; min-width: 1.3em; padding: 0 0.35em; margin-left: 0.2em; border-radius: 999px; background: var(--paper-dim); border: 1px solid var(--line); font-size: 0.85em; text-align: center; }
-.lc-material-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 0.5rem; }
-.lc-material-tabs button {
-  appearance: none; background: transparent; border: 1px solid transparent; border-bottom: 0;
-  border-radius: 3px 3px 0 0; padding: 0.35rem 0.7rem; margin-bottom: -1px; cursor: pointer;
-  font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; color: #5A4F3B;
+/* --- material de apoio (página da leitura): painel único de miniaturas --- */
+.lc-detail-info { min-width: 0; }  /* sem isso o flex deixa o conteúdo empurrar o card */
+.lc-material { margin-top: 1.25rem; padding-top: 0.9rem; border-top: 1px solid var(--line); min-width: 0; }
+.lc-material-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.1rem 0.75rem; margin-bottom: 0.6rem; }
+.lc-material-head h2 { font-size: 1.05rem; margin: 0; }
+.lc-material-summary { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: #5A4F3B; }
+
+.lc-mat-grid {
+  list-style: none; margin: 0; padding: 0.5rem;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); gap: 0.55rem 0.45rem;
+  background: var(--paper-dim); border: 1px solid var(--line); border-radius: 3px;
 }
-@media (max-width: 520px) { .lc-material-tabs button { padding: 0.35rem 0.45rem; font-size: 0.68rem; } }
-.lc-material-tabs button { white-space: nowrap; }
-.lc-material-tabs button[aria-selected="true"] { background: var(--paper-dim); border-color: var(--line); color: var(--text-on-paper); font-weight: 600; }
-.lc-material-tabs button:focus-visible, .lc-material-pane:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-/* painel com altura limitada: rola por dentro em vez de empurrar a página */
-.lc-material-pane { max-height: 15rem; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem; background: var(--paper-dim); border: 1px solid var(--line); border-radius: 3px; }
-.lc-material-pane[hidden] { display: none; }
-/* As miniaturas ficam contidas na largura da área da capa da leitura. */
-.lc-material-pane[data-pane="img"] { width: 100%; max-width: 240px; }
-.lc-thumbs {
-  list-style: none; margin: 0; padding: 0; display: grid;
-  grid-template-columns: repeat(auto-fill, 72px); justify-content: start; gap: 0.4rem;
+.lc-mat { min-width: 0; }
+.lc-mat a { display: flex; flex-direction: column; gap: 0.25rem; color: inherit; text-decoration: none; border-radius: 3px; }
+.lc-mat a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lc-mat-thumb {
+  position: relative; display: block; aspect-ratio: 3 / 4; overflow: hidden;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
-.lc-thumbs a {
-  display: block; width: 72px; height: 72px; aspect-ratio: 1;
-  border: 1px solid var(--line); border-radius: 3px; overflow: hidden;
-  background: var(--paper); cursor: zoom-in;
+.lc-mat:not(.is-pdf) a { cursor: zoom-in; }
+.lc-mat a:hover .lc-mat-thumb, .lc-mat a:focus-visible .lc-mat-thumb { border-color: var(--stamp); box-shadow: 0 0 0 2px var(--stamp); }
+.lc-mat-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; background: var(--paper); }
+.lc-mat:not(.is-pdf) .lc-mat-thumb img { object-fit: contain; object-position: center; }
+/* aparece enquanto a miniatura carrega, e fica se ela falhar (a <img> se remove) */
+.lc-mat-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.08em; color: #8a7c5c; }
+.lc-mat-badge {
+  position: absolute; left: 0.25rem; bottom: 0.25rem; padding: 0.05rem 0.35rem; border-radius: 2px;
+  background: var(--stamp); color: #fff; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500; letter-spacing: 0.06em; line-height: 1.4;
 }
-.lc-thumbs a:hover, .lc-thumbs a:focus-visible { border-color: var(--stamp); outline: none; box-shadow: 0 0 0 2px var(--stamp); }
-.lc-thumbs img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.lc-material-pane .lc-material-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; padding-bottom: 0.35rem; border-bottom: 1px dashed var(--line); }
-.lc-material-pane .lc-material-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+/* título em até 2 linhas; nomes sem espaços também quebram, nunca estouram */
+.lc-mat-title {
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere; font-size: 0.74rem; line-height: 1.25; color: var(--text-on-paper);
+}
+.lc-mat a:hover .lc-mat-title { text-decoration: underline; }
+
+/* com muitos arquivos, só as 2 primeiras linhas até clicar em "Ver todos" */
+.lc-mat-grid.is-collapsed .lc-mat:nth-child(n+9) { display: none; }
+.lc-mat-more {
+  appearance: none; display: block; width: 100%; margin: 0.5rem 0 0; padding: 0.4rem 0.6rem; cursor: pointer;
+  background: transparent; color: var(--text-on-paper); border: 1px solid var(--line); border-radius: 3px;
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.lc-mat-more:hover { background: var(--paper-dim); }
+.lc-mat-more:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
 /* lightbox */
 .lc-lightbox { border: 0; padding: 0; background: transparent; max-width: 100vw; max-height: 100vh; width: 100vw; height: 100vh; color: #fff; }
 .lc-lightbox:not([open]) { display: none; }
@@ -1030,57 +1042,3 @@ button.danger { color: var(--stamp); border-color: var(--stamp); }
 .lc-lb-open { position: fixed; bottom: 0.8rem; right: 1rem; font-size: 0.8rem; color: var(--text-on-ink); text-decoration: underline; }
 .lc-lightbox.is-single .lc-lb-nav { display: none; }
 .lc-material-admin .reject-form { margin-top: 0; }
-
-/* --- material de apoio: grade de cards contida na coluna de informações --- */
-.lc-detail-info,
-.lc-material,
-.lc-material-pane[data-pane="img"] {
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-.lc-material-pane[data-pane="img"] {
-  width: 100%;
-  max-height: 13rem;
-  overflow: auto;
-}
-.lc-thumbs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
-  align-items: start;
-  justify-items: start;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-.lc-thumbs li {
-  display: block;
-  width: 100%;
-  max-width: 76px;
-  min-width: 0;
-  box-sizing: border-box;
-}
-.lc-thumbs a {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 82px;
-  padding: 4px;
-  box-sizing: border-box;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  overflow: hidden;
-  background: var(--paper);
-  cursor: zoom-in;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-}
-.lc-thumbs img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}

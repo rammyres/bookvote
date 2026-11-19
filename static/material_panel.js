@@ -1,34 +1,35 @@
 // Painel de material de apoio (templates/lc_detail.html):
-//  - abas Imagens / Documentos PDF (com setas do teclado);
-//  - lightbox: clicar num thumbnail amplia a imagem; setas navegam, Esc fecha.
-// Sem JS, os thumbnails e links continuam abrindo o arquivo em nova aba.
+//  - grade única de miniaturas (imagens e PDFs); passando de LIMIT itens,
+//    mostra só as primeiras linhas e um botão "Ver todos";
+//  - lightbox: clicar numa imagem amplia; setas navegam, Esc fecha.
+// Sem JS, tudo continua visível e os links abrem o arquivo em nova aba.
 (function () {
   var panel = document.querySelector('[data-material-panel]');
   if (!panel) return;
 
-  // ---- abas ----
-  var tabs = Array.prototype.slice.call(panel.querySelectorAll('[role="tab"]'));
-  function selectTab(tab, focus) {
-    tabs.forEach(function (t) {
-      var on = t === tab;
-      t.setAttribute('aria-selected', on ? 'true' : 'false');
-      t.tabIndex = on ? 0 : -1;
-      var pane = panel.querySelector('[data-pane="' + t.getAttribute('data-tab') + '"]');
-      if (pane) pane.hidden = !on;
+  // ---- ver todos / mostrar menos ----
+  var LIMIT = 8;
+  var grid = panel.querySelector('.lc-mat-grid');
+  var total = grid ? grid.children.length : 0;
+  if (total > LIMIT) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'lc-mat-more';
+    btn.setAttribute('aria-controls', 'mat-grid');
+    grid.id = 'mat-grid';
+    var setCollapsed = function (c) {
+      grid.classList.toggle('is-collapsed', c);
+      btn.setAttribute('aria-expanded', c ? 'false' : 'true');
+      btn.textContent = c ? 'Ver todos (' + total + ')' : 'Mostrar menos';
+    };
+    btn.addEventListener('click', function () {
+      var collapse = !grid.classList.contains('is-collapsed');
+      setCollapsed(collapse);
+      if (collapse) panel.scrollIntoView({ block: 'nearest' });
     });
-    if (focus) tab.focus();
+    setCollapsed(true);
+    grid.insertAdjacentElement('afterend', btn);
   }
-  tabs.forEach(function (t, i) {
-    t.addEventListener('click', function () { selectTab(t, false); });
-    t.addEventListener('keydown', function (ev) {
-      var n = tabs.length, j = null;
-      if (ev.key === 'ArrowRight') j = (i + 1) % n;
-      else if (ev.key === 'ArrowLeft') j = (i - 1 + n) % n;
-      else if (ev.key === 'Home') j = 0;
-      else if (ev.key === 'End') j = n - 1;
-      if (j !== null) { ev.preventDefault(); selectTab(tabs[j], true); }
-    });
-  });
 
   // ---- lightbox ----
   var dlg = document.getElementById('lc-lightbox');

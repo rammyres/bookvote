@@ -10,12 +10,14 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from . import lc_logic as lc
 from . import cover_search
 from . import media
 from . import storage
+from . import thumbs
 from . import lc_suggestions as lcs
 from . import schedule_parser
 from .database import get_db
@@ -189,6 +191,32 @@ def build_router(templates, limiter) -> APIRouter:
         if obj.size is not None:
             headers["Content-Length"] = str(obj.size)
         return StreamingResponse(obj.chunks(), media_type=obj.content_type, headers=headers)
+
+    @router.get("/lc/{reading_id}/material/{material_id}/thumb")
+    def public_material_thumb(reading_id: str, material_id: str, db: Session = Depends(get_db)):
+        """Miniatura (JPEG) de um material: imagem reduzida ou 1ª página do
+        PDF. Gerada na primeira visita se ainda não existir (materiais
+        enviados antes das miniaturas) e guardada ao lado do original."""
+        m = db.query(LCMaterial).filter(LCMaterial.id == material_id, LCMaterial.reading_id == reading_id).first()
+        if not m:
+            raise HTTPException(404, "Material não encontrado.")
+        name = thumbs.thumb_name(m.filename)
+        obj = storage.open_object(storage.KIND_MATERIAL, name)
+        if not obj:
+            original = storage.get(storage.KIND_MATERIAL, m.filename)
+            if not original or not thumbs.store(m.filename, original, m.is_pdf):
+                if not m.is_pdf:  # imagem que não deu para reduzir: usa o original
+                    return RedirectResponse(m.url, status_code=302)
+                raise HTTPException(404, "Miniatura indisponível.")
+            obj = storage.open_object(storage.KIND_MATERIAL, name)
+            if not obj:
+                raise HTTPException(404, "Miniatura indisponível.")
+        headers = {"Cache-Control": storage.CACHE_CONTROL, "X-Content-Type-Options": "nosniff"}
+        if obj.local_path:
+            return FileResponse(obj.local_path, media_type="image/jpeg", headers=headers)
+        if obj.size is not None:
+            headers["Content-Length"] = str(obj.size)
+        return StreamingResponse(obj.chunks(), media_type="image/jpeg", headers=headers)
 
     # ------------------------------------------------------------ login/logout
 
@@ -682,6 +710,7 @@ def build_router(templates, limiter) -> APIRouter:
         lc.delete_cover_file(old_sched)
         for f in material_files:
             storage.delete(storage.KIND_MATERIAL, f)
+            thumbs.delete(f)
         return go("/adminlc", "deleted")
 
     # --------------------------------------------------- material de apoio (admin)
@@ -722,6 +751,7 @@ def build_router(templates, limiter) -> APIRouter:
                 logging.getLogger("bookvote.lc").exception("Falha ao gravar material")
                 count["fail"] += 1
                 continue
+            await run_in_threadpool(thumbs.store, stored, data, ext == "pdf")  # melhor esforço
             db.add(LCMaterial(
                 reading_id=r.id,
                 title=custom_title if (custom_title and len(uploads) == 1) else _material_title(up.filename),
@@ -764,6 +794,7 @@ def build_router(templates, limiter) -> APIRouter:
         db.delete(m)
         db.commit()
         storage.delete(storage.KIND_MATERIAL, stored)
+        thumbs.delete(stored)
         return _edit_url(reading_id, "msg=material_deleted")
 
     # ------------------------------------------------------- administradores
